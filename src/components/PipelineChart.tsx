@@ -12,7 +12,7 @@ export default function PipelineChart({ data }: PipelineChartProps) {
   const colors = ["#3b82f6", "#10b981", "#8b5cf6", "#ef4444"];
 
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6">
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-8">
       <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
         Pipeline Velocity
       </h3>

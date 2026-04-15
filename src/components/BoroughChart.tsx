@@ -17,7 +17,7 @@ interface BoroughChartProps {
 
 export default function BoroughChart({ data, title }: BoroughChartProps) {
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6">
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-8">
       <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">{title}</h3>
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={data} layout="vertical">

@@ -1,7 +1,6 @@
 import { fetchProjects, groupByMonth, groupByBorough, groupByStatus, groupByApplicantType } from "@/lib/zap";
 import {
   computePipeline,
-  groupByActionType,
   actionTypeTrends,
   computeHotspots,
   recentHotspots,
@@ -9,6 +8,18 @@ import {
   computeOutcomes,
   cycleComparison,
 } from "@/lib/zap-extended";
+import {
+  pipelineInsight,
+  cycleInsight,
+  outcomeInsight,
+  actionTrendInsight,
+  hotspotInsight,
+  mihInsight,
+  filingsInsight,
+  boroughInsight,
+  statusInsight,
+  applicantInsight,
+} from "@/lib/zap-insights";
 import StatCard from "@/components/StatCard";
 import TimeSeriesChart from "@/components/TimeSeriesChart";
 import BoroughChart from "@/components/BoroughChart";
@@ -20,6 +31,7 @@ import HotspotChart from "@/components/HotspotChart";
 import MIHChart from "@/components/MIHChart";
 import OutcomeChart from "@/components/OutcomeChart";
 import CycleComparisonChart from "@/components/CycleComparisonChart";
+import InsightBlurb from "@/components/InsightBlurb";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 3600;
@@ -37,14 +49,12 @@ export default async function Dashboard() {
     return new Date(p.app_filed_date) >= yearAgo;
   }).length;
 
-  // Core charts
   const filingsByMonth = groupByMonth(projects, "app_filed_date");
   const certificationsByMonth = groupByMonth(projects, "certified_referred");
   const boroughData = groupByBorough(projects);
   const statusData = groupByStatus(projects);
   const applicantData = groupByApplicantType(projects);
 
-  // Extended analytics
   const pipeline = computePipeline(projects);
   const actionTrends = actionTypeTrends(projects, 6);
   const hotspots = computeHotspots(projects);
@@ -52,6 +62,18 @@ export default async function Dashboard() {
   const mihData = computeMIH(projects);
   const outcomes = computeOutcomes(projects);
   const cycle = cycleComparison(projects);
+
+  // Generate insights
+  const pipelineText = pipelineInsight(pipeline);
+  const cycleText = cycleInsight(cycle.thisYear, cycle.lastYear, cycle.fiveYearAvg);
+  const outcomeText = outcomeInsight(outcomes);
+  const actionTrendText = actionTrendInsight(actionTrends);
+  const hotspotText = hotspotInsight(hotspots, recentHots);
+  const mihText = mihInsight(mihData);
+  const filingsText = filingsInsight(filingsByMonth);
+  const boroughText = boroughInsight(boroughData);
+  const statusText = statusInsight(statusData);
+  const applicantText = applicantInsight(applicantData);
 
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-slate-900">
@@ -81,19 +103,30 @@ export default async function Dashboard() {
           <p className="text-sm text-slate-500 dark:text-slate-400">Pipeline velocity, outcomes, and cycle analysis</p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <PipelineChart data={pipeline} />
-          <CycleComparisonChart
-            thisYear={cycle.thisYear}
-            lastYear={cycle.lastYear}
-            fiveYearAvg={cycle.fiveYearAvg}
-            monthly={cycle.monthly}
-          />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-2">
+          <div>
+            <PipelineChart data={pipeline} />
+            <InsightBlurb text={pipelineText} />
+          </div>
+          <div>
+            <CycleComparisonChart
+              thisYear={cycle.thisYear}
+              lastYear={cycle.lastYear}
+              fiveYearAvg={cycle.fiveYearAvg}
+              monthly={cycle.monthly}
+            />
+            <InsightBlurb text={cycleText} />
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <OutcomeChart data={outcomes} />
-          <TimeSeriesChart data={certificationsByMonth} title="Certifications / Referrals Over Time" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-2">
+          <div>
+            <OutcomeChart data={outcomes} />
+            <InsightBlurb text={outcomeText} />
+          </div>
+          <div>
+            <TimeSeriesChart data={certificationsByMonth} title="Certifications / Referrals Over Time" />
+          </div>
         </div>
 
         {/* ─── Market Trends Section ─── */}
@@ -102,18 +135,30 @@ export default async function Dashboard() {
           <p className="text-sm text-slate-500 dark:text-slate-400">What the market is pursuing and where</p>
         </div>
 
-        <div className="mb-8">
+        <div className="mb-2">
           <ActionTypeTrendsChart data={actionTrends} />
+          <InsightBlurb text={actionTrendText} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <TimeSeriesChart data={filingsByMonth} title="Application Filings Over Time" />
-          <BoroughChart data={boroughData} title="Projects by Borough" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-2">
+          <div>
+            <TimeSeriesChart data={filingsByMonth} title="Application Filings Over Time" />
+            <InsightBlurb text={filingsText} />
+          </div>
+          <div>
+            <BoroughChart data={boroughData} title="Projects by Borough" />
+            <InsightBlurb text={boroughText} />
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <HotspotChart data={hotspots} title="All-Time Hotspots" />
-          <HotspotChart data={recentHots} title="Recent Hotspots (12mo)" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-2">
+          <div>
+            <HotspotChart data={hotspots} title="All-Time Hotspots" />
+          </div>
+          <div>
+            <HotspotChart data={recentHots} title="Recent Hotspots (12mo)" />
+            <InsightBlurb text={hotspotText} />
+          </div>
         </div>
 
         {/* ─── MIH Section ─── */}
@@ -122,8 +167,9 @@ export default async function Dashboard() {
           <p className="text-sm text-slate-500 dark:text-slate-400">Mandatory Inclusionary Housing trends</p>
         </div>
 
-        <div className="mb-8">
+        <div className="mb-2">
           <MIHChart data={mihData} />
+          <InsightBlurb text={mihText} />
         </div>
 
         {/* ─── Breakdowns Section ─── */}
@@ -132,9 +178,15 @@ export default async function Dashboard() {
           <p className="text-sm text-slate-500 dark:text-slate-400">Status, applicant type, and more</p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <StatusChart data={statusData} title="Projects by Status" />
-          <ApplicantTypeChart data={applicantData} title="Projects by Applicant Type" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-2">
+          <div>
+            <StatusChart data={statusData} title="Projects by Status" />
+            <InsightBlurb text={statusText} />
+          </div>
+          <div>
+            <ApplicantTypeChart data={applicantData} title="Projects by Applicant Type" />
+            <InsightBlurb text={applicantText} />
+          </div>
         </div>
       </div>
     </main>

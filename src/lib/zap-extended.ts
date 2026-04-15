@@ -1,6 +1,7 @@
 // ZapDash — Extended data layer for pipeline velocity, action types, hotspots, MIH
 
 import { ZAPProject, fetchProjects, groupByMonth } from "./zap";
+import { ACTION_NAMES, formatActionCode } from "./action-codes";
 
 // ─── Pipeline Velocity ───
 
@@ -64,10 +65,14 @@ export function groupByActionType(projects: ZAPProject[]): { action: string; cou
   const buckets: Record<string, number> = {};
   for (const p of projects) {
     if (!p.actions) continue;
-    // actions can be comma-separated
     const actions = p.actions.split(",").map((a) => a.trim()).filter(Boolean);
-    for (const a of actions) {
-      buckets[a] = (buckets[a] || 0) + 1;
+    for (const raw of actions) {
+      // Split on semicolons too — some entries are "ZM; ZR"
+      const codes = raw.split(";").map((c) => c.trim()).filter(Boolean);
+      for (const code of codes) {
+        const label = formatActionCode(code);
+        buckets[label] = (buckets[label] || 0) + 1;
+      }
     }
   }
   return Object.entries(buckets)
@@ -85,7 +90,7 @@ export function actionTypeTrends(
 
   return topActions.map((action) => {
     const matching = projects.filter(
-      (p) => p.actions && p.actions.split(",").map((a) => a.trim()).includes(action)
+      (p) => p.actions && p.actions.split(",").map((a) => a.trim()).flatMap((a) => a.split(";").map((c) => c.trim())).some((code) => formatActionCode(code) === action)
     );
     return {
       action,
@@ -175,8 +180,9 @@ export function computeOutcomes(projects: ZAPProject[]): OutcomeData[] {
 
   for (const p of projects) {
     if (!p.actions) continue;
-    const actions = p.actions.split(",").map((a) => a.trim()).filter(Boolean);
-    for (const action of actions) {
+    const actions = p.actions.split(",").flatMap((a) => a.split(";").map((c) => c.trim())).filter(Boolean);
+    for (const rawCode of actions) {
+      const action = formatActionCode(rawCode);
       if (!buckets[action]) buckets[action] = { completed: 0, terminated: 0, total: 0 };
       buckets[action].total++;
       if (p.public_status === "Completed") buckets[action].completed++;

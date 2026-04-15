@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from "recharts";
@@ -11,6 +12,8 @@ interface ActionTypeTrendsProps {
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
 
 export default function ActionTypeTrendsChart({ data }: ActionTypeTrendsProps) {
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+
   // Merge all monthly data into unified timeline
   const allLabels = new Set<string>();
   data.forEach((d) => d.monthly.forEach((m) => allLabels.add(m.label)));
@@ -25,13 +28,22 @@ export default function ActionTypeTrendsChart({ data }: ActionTypeTrendsProps) {
     return row;
   });
 
+  const toggleLine = (action: string) => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(action)) next.delete(action);
+      else next.add(action);
+      return next;
+    });
+  };
+
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6">
       <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
         Filing Trends by Action Type
       </h3>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-        Top action types filed over time — what the market is pursuing
+        Top action types filed over time — what the market is pursuing. Click legend items to toggle lines.
       </p>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={merged}>
@@ -45,7 +57,14 @@ export default function ActionTypeTrendsChart({ data }: ActionTypeTrendsProps) {
               borderRadius: 8,
             }}
           />
-          <Legend />
+          <Legend
+            onClick={(e) => { if (e.dataKey) toggleLine(String(e.dataKey)); }}
+            formatter={(value: string) => (
+              <span style={{ opacity: hidden.has(value) ? 0.35 : 1, cursor: "pointer", textDecoration: hidden.has(value) ? "line-through" : "none" }}>
+                {value}
+              </span>
+            )}
+          />
           {data.map((d, i) => (
             <Line
               key={d.action}
@@ -54,6 +73,7 @@ export default function ActionTypeTrendsChart({ data }: ActionTypeTrendsProps) {
               stroke={COLORS[i % COLORS.length]}
               strokeWidth={2}
               dot={false}
+              hide={hidden.has(d.action)}
             />
           ))}
         </LineChart>

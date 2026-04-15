@@ -8,6 +8,7 @@ import {
   computeOutcomes,
   cycleComparison,
 } from "@/lib/zap-extended";
+import { computeTopDevelopers, computeTopProjects } from "@/lib/zap-leaders";
 import {
   pipelineInsight,
   cycleInsight,
@@ -32,6 +33,8 @@ import MIHChart from "@/components/MIHChart";
 import OutcomeChart from "@/components/OutcomeChart";
 import CycleComparisonChart from "@/components/CycleComparisonChart";
 import InsightBlurb from "@/components/InsightBlurb";
+import TopDevelopersTable from "@/components/TopDevelopersTable";
+import TopProjectsTable from "@/components/TopProjectsTable";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 3600;
@@ -62,6 +65,8 @@ export default async function Dashboard() {
   const mihData = computeMIH(projects);
   const outcomes = computeOutcomes(projects);
   const cycle = cycleComparison(projects);
+  const topDevelopers = computeTopDevelopers(projects);
+  const topProjects = computeTopProjects(projects);
 
   const pipelineText = pipelineInsight(pipeline);
   const cycleText = cycleInsight(cycle.thisYear, cycle.lastYear, cycle.fiveYearAvg);
@@ -168,6 +173,17 @@ export default async function Dashboard() {
           <div>
             <MIHChart data={mihData} />
             <InsightBlurb text={mihText} />
+          </div>
+        </section>
+
+        {/* ─── Leaderboard ─── */}
+        <section className="mb-16">
+          <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-1">Leaderboard</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-8">Top developers and top projects by size and activity</p>
+
+          <div className="grid grid-cols-1 gap-8">
+            <TopDevelopersTable data={topDevelopers} />
+            <TopProjectsTable data={topProjects} />
           </div>
         </section>
 

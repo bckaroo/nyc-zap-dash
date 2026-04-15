@@ -65,7 +65,8 @@ export default async function Dashboard() {
   const mihData = computeMIH(projects);
   const outcomes = computeOutcomes(projects);
   const cycle = cycleComparison(projects);
-  const topDevelopers = computeTopDevelopers(projects);
+  const topDevelopersPrivate = computeTopDevelopers(projects, "private");
+  const topDevelopersPublic = computeTopDevelopers(projects, "public");
   const topProjects = computeTopProjects(projects);
 
   const pipelineText = pipelineInsight(pipeline);
@@ -182,7 +183,7 @@ export default async function Dashboard() {
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-8">Top developers and top projects by size and activity</p>
 
           <div className="grid grid-cols-1 gap-8">
-            <TopDevelopersTable data={topDevelopers} />
+            <TopDevelopersTable privateData={topDevelopersPrivate} publicData={topDevelopersPublic} />
             <TopProjectsTable data={topProjects} />
           </div>
         </section>

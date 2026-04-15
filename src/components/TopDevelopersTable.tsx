@@ -1,20 +1,51 @@
 "use client";
 
+import { useState } from "react";
 import { TopDeveloper } from "@/lib/zap-leaders";
 
 interface TopDevelopersTableProps {
-  data: TopDeveloper[];
+  privateData: TopDeveloper[];
+  publicData: TopDeveloper[];
 }
 
-export default function TopDevelopersTable({ data }: TopDevelopersTableProps) {
+export default function TopDevelopersTable({ privateData, publicData }: TopDevelopersTableProps) {
+  const [sector, setSector] = useState<"private" | "public">("private");
+  const data = sector === "private" ? privateData : publicData;
+
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-8">
-      <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-        Top Private Developers
-      </h3>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-        Most active private applicants by project count (excludes public agencies)
-      </p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">
+            Top {sector === "private" ? "Private" : "Public"} Developers
+          </h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Most active {sector} applicants by project count
+          </p>
+        </div>
+        <div className="flex rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden">
+          <button
+            onClick={() => setSector("private")}
+            className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+              sector === "private"
+                ? "bg-blue-600 text-white"
+                : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+            }`}
+          >
+            Private
+          </button>
+          <button
+            onClick={() => setSector("public")}
+            className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+              sector === "public"
+                ? "bg-blue-600 text-white"
+                : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+            }`}
+          >
+            Public
+          </button>
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>

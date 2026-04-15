@@ -34,12 +34,31 @@ function extractMagnitude(brief: string): { zsft?: number; units?: number } {
   return result;
 }
 
-export function computeTopDevelopers(projects: ZAPProject[], topN = 15): TopDeveloper[] {
+// Known public agency codes/names
+const PUBLIC_AGENCIES = new Set([
+  "DCP", "DRP", "HPD", "LPC", "DEP", "DOT", "DPR", "DSNY", "HRA", "PDC",
+  "DCAS - Department of Citywide Administrative Services (NYC)",
+  "Department of General Services (now part of DCAS)",
+]);
+
+function isPublicAgency(name: string): boolean {
+  if (PUBLIC_AGENCIES.has(name)) return true;
+  // Catch common patterns
+  if (/^(NYC|NY|New York City|City of|Dept|Department|DCP|HPD|DPR|DOT|DEP|DSNY|SBS|EDC|DDC|DCLA|DOB|DOF|DOH|DOITT|DOmh|DORIS|FDNY|NYPD|TLC|ACRIS)/i.test(name)) return true;
+  return false;
+}
+
+export function computeTopDevelopers(projects: ZAPProject[], sector: "private" | "public" | "all" = "all", topN = 15): TopDeveloper[] {
   const devMap: Record<string, { count: number; boroughs: Set<string>; actions: Set<string>; recentProject?: string }> = {};
 
   for (const p of projects) {
     const name = p.primary_applicant;
-    if (!name || name === "Unknown" || name === "DCP" || name === "DRP" || name === "HPD" || name === "LPC" || name === "DEP" || name === "DCAS" || name === "DOT" || name === "DPR" || name === "DSNY" || name === "HRA") continue;
+    if (!name || name === "Unknown") continue;
+
+    // Filter by sector
+    if (sector === "private" && isPublicAgency(name)) continue;
+    if (sector === "public" && !isPublicAgency(name)) continue;
+
     if (!devMap[name]) {
       devMap[name] = { count: 0, boroughs: new Set(), actions: new Set() };
     }

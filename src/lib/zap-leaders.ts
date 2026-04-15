@@ -41,6 +41,43 @@ const PUBLIC_AGENCIES = new Set([
   "Department of General Services (now part of DCAS)",
 ]);
 
+const AGENCY_NAMES: Record<string, string> = {
+  DCP: "Dept. of City Planning (DCP)",
+  DRP: "Dept. of City Planning – Regional (DRP)",
+  HPD: "Dept. of Housing Preservation & Development (HPD)",
+  LPC: "Landmarks Preservation Commission (LPC)",
+  DEP: "Dept. of Environmental Protection (DEP)",
+  DOT: "Dept. of Transportation (DOT)",
+  DPR: "Dept. of Parks & Recreation (DPR)",
+  DSNY: "Dept. of Sanitation (DSNY)",
+  HRA: "Human Resources Administration (HRA)",
+  PDC: "Public Design Commission (PDC)",
+  DCAS: "Dept. of Citywide Administrative Services (DCAS)",
+  SBS: "Dept. of Small Business Services (SBS)",
+  EDC: "Economic Development Corporation (EDC)",
+  DDC: "Dept. of Design & Construction (DDC)",
+  DOB: "Dept. of Buildings (DOB)",
+  DOF: "Dept. of Finance (DOF)",
+  DOH: "Dept. of Health (DOH)",
+  DOITT: "Dept. of Information Technology (DOITT)",
+  DCLA: "Dept. of Cultural Affairs (DCLA)",
+  FDNY: "Fire Department (FDNY)",
+  NYPD: "Police Department (NYPD)",
+  TLC: "Taxi & Limousine Commission (TLC)",
+};
+
+function expandAgencyName(name: string): string {
+  // Exact match first
+  if (AGENCY_NAMES[name]) return AGENCY_NAMES[name];
+  // Check if the name starts with a known acronym pattern
+  const match = name.match(/^([A-Z]{2,6})\b/);
+  if (match && AGENCY_NAMES[match[1]]) return AGENCY_NAMES[match[1]];
+  // DCAS long form
+  if (name.includes("DCAS")) return "Dept. of Citywide Administrative Services (DCAS)";
+  if (name.includes("Department of General Services")) return "Dept. of General Services (DCAS)";
+  return name;
+}
+
 function isPublicAgency(name: string): boolean {
   if (PUBLIC_AGENCIES.has(name)) return true;
   // Catch common patterns
@@ -52,12 +89,13 @@ export function computeTopDevelopers(projects: ZAPProject[], sector: "private" |
   const devMap: Record<string, { count: number; boroughs: Set<string>; actions: Set<string>; recentProject?: string }> = {};
 
   for (const p of projects) {
-    const name = p.primary_applicant;
-    if (!name || name === "Unknown") continue;
+    const rawName = p.primary_applicant || "";
+    const name = expandAgencyName(rawName);
+    if (!rawName || rawName === "Unknown") continue;
 
     // Filter by sector
-    if (sector === "private" && isPublicAgency(name)) continue;
-    if (sector === "public" && !isPublicAgency(name)) continue;
+    if (sector === "private" && isPublicAgency(rawName)) continue;
+    if (sector === "public" && !isPublicAgency(rawName)) continue;
 
     if (!devMap[name]) {
       devMap[name] = { count: 0, boroughs: new Set(), actions: new Set() };

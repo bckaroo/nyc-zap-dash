@@ -28,7 +28,7 @@ export default function OutcomeChart({ data }: OutcomeChartProps) {
         <BarChart data={chartData} layout="vertical">
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis type="number" tick={{ fontSize: 12 }} />
-          <YAxis dataKey="action" type="category" tick={{ fontSize: 11 }} width={60} />
+          <YAxis dataKey="action" type="category" tick={{ fontSize: 11 }} width={220} />
           <Tooltip
             contentStyle={{
               backgroundColor: "rgba(255,255,255,0.95)",

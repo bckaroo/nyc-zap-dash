@@ -19,6 +19,10 @@ export interface ZAPProject {
   ulurp_non?: string;
   ceqr_number?: string;
   mih_flag?: string;
+  mih_option1?: string;
+  mih_option2?: string;
+  mih_workforce?: string;
+  mih_deepaffordability?: string;
   project_brief?: string;
 }
 

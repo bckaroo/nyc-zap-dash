@@ -88,7 +88,15 @@ function isPublicAgency(name: string): boolean {
 export function computeTopDevelopers(projects: ZAPProject[], sector: "private" | "public" | "all" = "all", topN = 15): TopDeveloper[] {
   const devMap: Record<string, { count: number; boroughs: Set<string>; actions: Set<string>; recentProject?: string }> = {};
 
-  for (const p of projects) {
+  // Filter to rolling 12 months
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 12);
+  const recent = projects.filter((p) => {
+    if (!p.app_filed_date) return false;
+    return new Date(p.app_filed_date) >= cutoff;
+  });
+
+  for (const p of recent) {
     const rawName = p.primary_applicant || "";
     const name = expandAgencyName(rawName);
     if (!rawName || rawName === "Unknown") continue;
@@ -119,8 +127,16 @@ export function computeTopDevelopers(projects: ZAPProject[], sector: "private" |
 }
 
 export function computeTopProjects(projects: ZAPProject[], topN = 15): TopProject[] {
+  // Filter to rolling 12 months
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 12);
+
   const scored = projects
-    .filter((p) => p.project_name && p.primary_applicant && p.primary_applicant !== "Unknown")
+    .filter((p) => {
+      if (!p.project_name || !p.primary_applicant || p.primary_applicant === "Unknown") return false;
+      if (!p.app_filed_date) return false;
+      return new Date(p.app_filed_date) >= cutoff;
+    })
     .map((p) => {
       // Score by: action count + brief magnitude (zsf/units) + recency bonus
       const actionCount = p.actions ? p.actions.split(";").map((a) => a.trim()).filter(Boolean).length : 0;

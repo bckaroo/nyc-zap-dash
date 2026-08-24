@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ZAP operational artifacts — retain in the newsroom operational store, never git
+zap-applications.db
+zap-weekly-data.json
+zap-newsletter-draft-*.html
+
+# Python verification artifacts
+__pycache__/
+*.py[cod]

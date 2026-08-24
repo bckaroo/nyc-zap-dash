@@ -138,13 +138,13 @@ If any check fails, fix before saving.
 # Save the draft
 # File: /home/abuck/.openclaw/workspace/zap-newsletter-draft-YYYY-MM-DD.html
 
-# Send (requires approval)
-gog gmail send \
-  --account abuck.bot@gmail.com \
-  --to abuck@vhb.com \
-  --cc aruddock@vhb.com \
-  --subject "Weekly Zoning Watch — [Date Range]" \
-  --body-html "$(cat /home/abuck/.openclaw/workspace/zap-newsletter-draft-YYYY-MM-DD.html)"
+    # Send (requires approval) — MUST use --body-html, not --body-file (plain text)
+    gog gmail send \
+      --account abuck.bot@gmail.com \
+      --to abuck@vhb.com \
+      --cc aruddock@vhb.com \
+      --subject "Weekly Zoning Watch — [Date Range]" \
+      --body-html "$(cat /home/abuck/.openclaw/workspace/dev/zap/data/drafts/zap-newsletter-draft-YYYY-MM-DD.html)"
 ```
 
 **⚠️ ALWAYS show the draft to bckaroo for approval before sending.**

@@ -40,9 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# ZAP operational artifacts — retain in the newsroom operational store, never git
-zap-applications.db
-zap-weekly-data.json
+# ZAP operational artifacts — live in data/ inside this repo, never git
+/data/
+public-dashboard-data.json
 zap-newsletter-draft-*.html
 
 # Python verification artifacts

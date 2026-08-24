@@ -41,14 +41,14 @@ every week; the generator only reads from it. No external/stale seed DB required
 
 ```bash
 # Full weekly resync (what the cron runs) — ~10-15 min
-python3 /home/abuck/.openclaw/workspace/scripts/zap-collector.py --verbose
+python3 /home/abuck/.openclaw/workspace/dev/zap/scripts/zap-collector.py --verbose
 
 # Limited test (fast smoke test)
-python3 /home/abuck/.openclaw/workspace/scripts/zap-collector.py --scan-years 2026 --scan-range 12 --verbose
+python3 /home/abuck/.openclaw/workspace/dev/zap/scripts/zap-collector.py --scan-years 2026 --scan-range 12 --verbose
 
 # Outputs:
-#   /home/abuck/.openclaw/workspace/projects/newsroom/zap-newsletter/zap-applications.db  (stable store)
-#   /home/abuck/.openclaw/workspace/zap-weekly-data.json
+#   /home/abuck/.openclaw/workspace/dev/zap/data/zap-applications.db  (stable store)
+#   /home/abuck/.openclaw/workspace/dev/zap/data/zap-weekly-data.json
 ```
 
 The collector is stdlib-only and resilient: it treats HTTP 404s as "project not
@@ -170,8 +170,8 @@ never be triggered if the collector failed.
 |------|---------|
 | `scripts/zap-collector.py` | **Deterministic data collector** (replaces zap-fetch-pipeline.py) |
 | `scripts/zap-cron-migrate.py` | One-time cron consolidation script |
-| `projects/newsroom/zap-newsletter/zap-applications.db` | **Stable, self-building SQLite store** |
-| `zap-weekly-data.json` | Weekly data output (read by generator) |
+| `data/zap-applications.db` | **Stable, self-building SQLite store** |
+| `data/zap-weekly-data.json` | Weekly data output (read by generator) |
 | `zap-newsletter-draft-YYYY-MM-DD.html` | Newsletter HTML drafts |
 | `zap-newsletter-draft-2026-05-04.html` | Gold standard template |
 

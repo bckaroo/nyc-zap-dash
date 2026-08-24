@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DB_PATH = BASE_DIR / "zap-applications.db"
-OUT_PATH = BASE_DIR / "files" / "public-dashboard-data.json"
+DB_PATH = BASE_DIR / "data" / "zap-applications.db"
+OUT_PATH = BASE_DIR / "data" / "public-dashboard-data.json"
 
 
 def row_to_dict(cursor: sqlite3.Cursor, row: sqlite3.Row) -> dict:

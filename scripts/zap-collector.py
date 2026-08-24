@@ -41,8 +41,9 @@ from datetime import datetime, timedelta, timezone
 ZAP_API_BASE = "https://zap-api-production.herokuapp.com/projects"
 
 # Where the stable DB lives (self-building; created if missing).
-DEFAULT_DB = "/home/abuck/.openclaw/workspace/projects/newsroom/zap-newsletter/zap-applications.db"
-DEFAULT_OUTPUT = "/home/abuck/.openclaw/workspace/projects/newsroom/zap-newsletter/zap-weekly-data.json"
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DEFAULT_DB = f"{REPO_ROOT}/data/zap-applications.db"
+DEFAULT_OUTPUT = f"{REPO_ROOT}/data/zap-weekly-data.json"
 
 # Borough prefix codes: M=Manhattan, K=Brooklyn, Q=Queens, X=Bronx, R=Staten Island
 BOROUGH_PREFIXES = ["M", "K", "Q", "X", "R"]

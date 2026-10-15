@@ -9,10 +9,10 @@ import {
   buildOverview,
   computeApplicantLeaderboard,
   filterApplications,
-  monthlyActivityTrend,
   selectWeeklyHighlights,
   type DashboardPayload,
 } from "../lib/dashboard-analytics";
+import GeographyMap from "./GeographyMap";
 
 function formatDate(value: string): string {
   if (!value) return "Not reported";
@@ -52,11 +52,16 @@ function stalenessLabel(collectedThrough: string, generatedAt: string): string {
   return `Collection is ${days} day${days === 1 ? "" : "s"} behind this export`;
 }
 
+function applicantPanelId(name: string): string {
+  return `applicant-projects-${name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+}
+
 export default function DashboardExplorer({ payload }: { payload: DashboardPayload }) {
   const [search, setSearch] = useState("");
   const [borough, setBorough] = useState("");
   const [communityDistrict, setCommunityDistrict] = useState("");
   const [status, setStatus] = useState("");
+  const [expandedApplicant, setExpandedApplicant] = useState<string | null>(null);
 
   const overview = useMemo(() => buildOverview(payload.records), [payload.records]);
   const boroughs = useMemo(
@@ -86,10 +91,6 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
       }),
     [borough, communityDistrict, payload.records, search, status],
   );
-  const trend = useMemo(
-    () => monthlyActivityTrend(payload.records, { borough, communityDistrict }, payload.collected_through, 18),
-    [borough, communityDistrict, payload.collected_through, payload.records],
-  );
   const leaderboard = useMemo(
     () => computeApplicantLeaderboard(payload.records, payload.collected_through),
     [payload.collected_through, payload.records],
@@ -98,7 +99,6 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
     () => selectWeeklyHighlights(payload.records, payload.collected_through),
     [payload.collected_through, payload.records],
   );
-  const maxTrend = Math.max(...trend.map((item) => item.count), 1);
   const staleness = stalenessLabel(payload.collected_through, payload.generated_at);
 
   function handleBoroughChange(value: string) {
@@ -218,7 +218,7 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
               <p className="eyebrow ink">Geography</p>
               <h2 id="geography-heading">Borough and Community District activity</h2>
             </div>
-            <p>Monthly activity uses milestone, certification/referral, then first-seen date.</p>
+            <p>Counts use this ZAP snapshot; boundary files provide cartographic reference only.</p>
           </div>
           <div className="filter-row geography-filters">
             <label>
@@ -240,34 +240,12 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
               </select>
             </label>
           </div>
-          {trend.length ? (
-            <>
-              <div className="trend-chart" aria-hidden="true">
-                {trend.map((item) => (
-                  <div className="trend-column" key={item.month}>
-                    <span className="trend-count">{item.count}</span>
-                    <div className="trend-track">
-                      <div className="trend-bar" style={{ height: `${Math.max(8, (item.count / maxTrend) * 100)}%` }} />
-                    </div>
-                    <span className="trend-label">{item.month}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="trend-table-wrap">
-                <table className="trend-table">
-                  <caption>Monthly application activity data</caption>
-                  <thead><tr><th scope="col">Month</th><th scope="col">Applications</th></tr></thead>
-                  <tbody>
-                    {trend.map((item) => (
-                      <tr key={item.month}><th scope="row">{item.month}</th><td>{item.count}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <p className="empty-state">No dated activity matches this geography.</p>
-          )}
+          <GeographyMap
+            mapData={payload.map}
+            borough={borough}
+            communityDistrict={communityDistrict}
+            collectedThrough={payload.collected_through}
+          />
         </section>
 
         <section className="panel applicant-panel" aria-labelledby="applicants-heading">
@@ -277,13 +255,45 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
             <p className="caveat">{APPLICANT_CAVEAT.body}</p>
           </div>
           <ol className="leaderboard">
-            {leaderboard.map((applicant, index) => (
-              <li key={applicant.name}>
-                <span className="rank">{String(index + 1).padStart(2, "0")}</span>
-                <span>{applicant.name}</span>
-                <strong>{applicant.applicationCount}</strong>
+            {leaderboard.map((applicant, index) => {
+              const panelId = applicantPanelId(applicant.name);
+              const isExpanded = expandedApplicant === applicant.name;
+              return (
+              <li key={applicant.name} className={isExpanded ? "expanded" : undefined}>
+                <button
+                  type="button"
+                  className="applicant-toggle"
+                  aria-expanded={isExpanded}
+                  aria-controls={panelId}
+                  onClick={() => setExpandedApplicant(isExpanded ? null : applicant.name)}
+                >
+                  <span className="rank">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="applicant-name">{applicant.name}</span>
+                  <strong aria-label={`${applicant.applicationCount} applications`}>{applicant.applicationCount}</strong>
+                  <span className="applicant-affordance" aria-hidden="true">{isExpanded ? "−" : "+"}</span>
+                </button>
+                <div
+                  id={panelId}
+                  role="region"
+                  aria-label={`Projects counted for ${applicant.name}`}
+                  hidden={!isExpanded}
+                  className="applicant-projects"
+                >
+                  <p>{applicant.applicationCount} project{applicant.applicationCount === 1 ? "" : "s"} counted in the trailing 12 months:</p>
+                  <ul>
+                    {applicant.projects.map((project) => (
+                      <li key={project.id}>
+                        <a href={project.source_url} target="_blank" rel="noreferrer noopener">
+                          {project.project_name || "Unnamed application"}
+                        </a>
+                        <span>{project.project_id} · {formatDate(project.activity_date)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </li>
-            ))}
+              );
+            })}
           </ol>
         </section>
 

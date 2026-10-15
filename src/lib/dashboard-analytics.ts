@@ -1,3 +1,5 @@
+import type { MapPayload } from "./map-data";
+
 export interface DashboardRecord {
   id: string;
   project_id: string;
@@ -20,6 +22,9 @@ export interface DashboardRecord {
   last_updated_date: string;
   activity_date: string;
   source_url: string;
+  action_types: string[];
+  location_method: string;
+  location_source: string;
 }
 
 export interface DashboardPayload {
@@ -31,6 +36,11 @@ export interface DashboardPayload {
     url: string;
     api_url: string;
   };
+  boundaries?: {
+    boroughs: { dataset_id: string; name?: string; source_url?: string; file?: string; retrieved_at?: string };
+    community_districts: { dataset_id: string; name?: string; source_url?: string; file?: string; retrieved_at?: string; scope?: string };
+  };
+  map?: MapPayload;
   records: DashboardRecord[];
 }
 
@@ -160,26 +170,36 @@ export function computeApplicantLeaderboard(
   records: DashboardRecord[],
   asOf: string,
   limit = 10,
-): { name: string; applicationCount: number }[] {
+): { name: string; applicationCount: number; projects: DashboardRecord[] }[] {
   const asOfDate = utcDateOnly(asOf);
   if (!asOfDate) return [];
   const cutoff = new Date(asOfDate);
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 1);
 
-  const counts = new Map<string, number>();
+  const projectsByApplicant = new Map<string, DashboardRecord[]>();
   for (const record of records) {
     const name = record.primary_applicant.trim();
     if (!name || name.toLocaleLowerCase() === "unknown" || !isValidDate(record.activity_date)) continue;
     const activityDate = utcDateOnly(record.activity_date);
     if (!activityDate) continue;
     if (activityDate < cutoff || activityDate > asOfDate) continue;
-    counts.set(name, (counts.get(name) ?? 0) + 1);
+    const projects = projectsByApplicant.get(name) ?? [];
+    projects.push(record);
+    projectsByApplicant.set(name, projects);
   }
 
-  return [...counts.entries()]
-    .sort(([leftName, leftCount], [rightName, rightCount]) =>
-      rightCount - leftCount || leftName.localeCompare(rightName),
+  return [...projectsByApplicant.entries()]
+    .sort(([leftName, leftProjects], [rightName, rightProjects]) =>
+      rightProjects.length - leftProjects.length || leftName.localeCompare(rightName),
     )
     .slice(0, limit)
-    .map(([name, applicationCount]) => ({ name, applicationCount }));
+    .map(([name, projects]) => ({
+      name,
+      applicationCount: projects.length,
+      projects: [...projects].sort((left, right) =>
+        right.activity_date.localeCompare(left.activity_date)
+        || left.project_name.localeCompare(right.project_name)
+        || left.id.localeCompare(right.id),
+      ),
+    }));
 }

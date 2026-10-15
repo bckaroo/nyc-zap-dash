@@ -120,6 +120,30 @@ def extract_project_data(pid, api_data):
     ceqr_type = safe_str(attrs.get("dcp-ceqrtype"))
     eas_eis = safe_str(attrs.get("dcp-easeis"))
 
+    bbls = [safe_str(value).strip() for value in attrs.get("bbls", []) if safe_str(value).strip()] \
+        if isinstance(attrs.get("bbls"), list) else []
+    feature_collection = attrs.get("bbl-featurecollection")
+    if not isinstance(feature_collection, dict) or feature_collection.get("type") != "FeatureCollection":
+        feature_collection = {"type": "FeatureCollection", "features": []}
+    if not isinstance(feature_collection.get("features"), list):
+        feature_collection = {"type": "FeatureCollection", "features": []}
+
+    action_codes = []
+    for item in api_data.get("included", []):
+        if item.get("type") != "actions":
+            continue
+        code = safe_str(item.get("attributes", {}).get("dcp-action-value")).strip().upper()
+        if code and code not in action_codes:
+            action_codes.append(code)
+
+    has_authoritative_geometry = any(
+        isinstance(feature, dict)
+        and isinstance(feature.get("geometry"), dict)
+        and feature["geometry"].get("type") in {"Polygon", "MultiPolygon"}
+        and feature["geometry"].get("coordinates")
+        for feature in feature_collection["features"]
+    )
+
     # Milestones with actual dates → freshest activity signal
     milestones = []
     for item in api_data.get("included", []):
@@ -185,6 +209,12 @@ def extract_project_data(pid, api_data):
         "milestones": milestones,
         "dispositions": dispositions,
         "zapi_url": f"https://zap.planning.nyc.gov/projects/{pid}",
+        "bbls": bbls,
+        "bbl_featurecollection": feature_collection,
+        "action_codes": action_codes,
+        "geography_location_method": "zap_bbl_polygon" if has_authoritative_geometry else "",
+        "geography_location_source": "ZAP bbl-featurecollection" if has_authoritative_geometry else "",
+        "geography_status": "located" if has_authoritative_geometry else "unmatched",
     }
 
 
@@ -212,6 +242,13 @@ DB_COLUMNS = {
     "first_seen_date": "TEXT DEFAULT CURRENT_TIMESTAMP",
     "last_updated_date": "TEXT",
     "newsletter_included": "TEXT",
+    "bbls_json": "TEXT",
+    "bbl_featurecollection_json": "TEXT",
+    "action_codes_json": "TEXT",
+    "geography_location_method": "TEXT",
+    "geography_location_source": "TEXT",
+    "geography_enriched_at": "TEXT",
+    "geography_status": "TEXT",
 }
 
 
@@ -236,8 +273,11 @@ def upsert(conn, row, today):
             community_district, public_status, ulurp_non, ceqr_number,
             ceqr_type, eas_eis, primary_applicant, applicant_type,
             flood_zone_a, flood_zone_shadedx, milestone_date,
-            certified_referred, noticed_date, last_updated_date
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            certified_referred, noticed_date, last_updated_date,
+            bbls_json, bbl_featurecollection_json, action_codes_json,
+            geography_location_method, geography_location_source,
+            geography_enriched_at, geography_status
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
             project_name=excluded.project_name,
             project_brief=excluded.project_brief,
@@ -255,7 +295,14 @@ def upsert(conn, row, today):
             milestone_date=excluded.milestone_date,
             certified_referred=excluded.certified_referred,
             noticed_date=excluded.noticed_date,
-            last_updated_date=excluded.last_updated_date
+            last_updated_date=excluded.last_updated_date,
+            bbls_json=excluded.bbls_json,
+            bbl_featurecollection_json=excluded.bbl_featurecollection_json,
+            action_codes_json=excluded.action_codes_json,
+            geography_location_method=excluded.geography_location_method,
+            geography_location_source=excluded.geography_location_source,
+            geography_enriched_at=excluded.geography_enriched_at,
+            geography_status=excluded.geography_status
     """, (
         row["id"], row["project_id"], row["project_name"], row["project_brief"],
         row["borough"], row["community_district"], row["public_status"],
@@ -263,7 +310,86 @@ def upsert(conn, row, today):
         row["primary_applicant"], row["applicant_type"], row["flood_zone_a"],
         row["flood_zone_shadedx"], row["milestone_date"], row["certified_referred"],
         row["noticed_date"], today,
+        json.dumps(row["bbls"], separators=(",", ":")),
+        json.dumps(row["bbl_featurecollection"], separators=(",", ":")),
+        json.dumps(row["action_codes"], separators=(",", ":")),
+        row["geography_location_method"], row["geography_location_source"],
+        datetime.now(timezone.utc).isoformat(), row["geography_status"],
     ))
+
+
+def build_enrichment_ids(db_conn):
+    """Return only exact project IDs already present in the operational cache."""
+    return [
+        row[0]
+        for row in db_conn.execute(
+            "SELECT id FROM zap_applications WHERE id IS NOT NULL AND trim(id) != '' ORDER BY id"
+        ).fetchall()
+    ]
+
+
+def update_geography(conn, row, enriched_at):
+    """Update durable geography fields without changing collection freshness."""
+    conn.execute(
+        """
+        UPDATE zap_applications SET
+            bbls_json=?, bbl_featurecollection_json=?, action_codes_json=?,
+            geography_location_method=?, geography_location_source=?,
+            geography_enriched_at=?, geography_status=?
+        WHERE id=?
+        """,
+        (
+            json.dumps(row["bbls"], separators=(",", ":")),
+            json.dumps(row["bbl_featurecollection"], separators=(",", ":")),
+            json.dumps(row["action_codes"], separators=(",", ":")),
+            row["geography_location_method"], row["geography_location_source"],
+            enriched_at, row["geography_status"], row["id"],
+        ),
+    )
+
+
+def enrich_existing_projects(db_path, verbose=False):
+    """Enrich DB-known rows only; never generate or scan candidate IDs."""
+    if not os.path.isfile(db_path):
+        raise FileNotFoundError(f"Operational ZAP database not found: {db_path}")
+    conn = sqlite3.connect(db_path)
+    try:
+        init_db(conn)
+        ids = build_enrichment_ids(conn)
+        enriched_at = datetime.now(timezone.utc).isoformat()
+        located = unmatched = not_found = errors = 0
+        for index, pid in enumerate(ids, start=1):
+            result = fetch_project(pid, verbose)
+            if result == "ERR":
+                errors += 1
+                continue
+            if result is None:
+                conn.execute(
+                    "UPDATE zap_applications SET geography_enriched_at=?, geography_status=? WHERE id=?",
+                    (enriched_at, "api_not_found", pid),
+                )
+                not_found += 1
+                continue
+            row = extract_project_data(pid, result)
+            update_geography(conn, row, enriched_at)
+            if row["geography_status"] == "located":
+                located += 1
+            else:
+                unmatched += 1
+            if index < len(ids):
+                time.sleep(SLEEP_BETWEEN_CALLS)
+        conn.commit()
+        summary = {
+            "candidates": len(ids),
+            "located": located,
+            "unmatched": unmatched,
+            "api_not_found": not_found,
+            "api_errors": errors,
+        }
+        print("ZAP geography enrichment complete: " + ", ".join(f"{key}={value}" for key, value in summary.items()))
+        return summary
+    finally:
+        conn.close()
 
 
 def build_candidate_ids(db_conn, scan_years, scan_range):
@@ -420,8 +546,16 @@ if __name__ == "__main__":
     parser.add_argument("--scan-range", type=int, default=DEFAULT_SCAN_RANGE)
     parser.add_argument("--lookback", type=int, default=60,
                         help="Milestone lookback window (days) for DB freshness")
+    parser.add_argument(
+        "--enrich-geography-only",
+        action="store_true",
+        help="Fetch geography and action fields for exact IDs already stored in the DB; never scan IDs",
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
-    run(args.db, args.output, args.scan_years, args.scan_range,
-        args.lookback, args.verbose)
+    if args.enrich_geography_only:
+        enrich_existing_projects(args.db, args.verbose)
+    else:
+        run(args.db, args.output, args.scan_years, args.scan_range,
+            args.lookback, args.verbose)

@@ -38,6 +38,9 @@ const records: DashboardRecord[] = [
     last_updated_date: "2026-10-01",
     activity_date: "2026-09-15",
     source_url: "https://zap.planning.nyc.gov/projects/2026K0001",
+    action_types: ["ZM"],
+    location_method: "point_on_zap_bbl_polygon",
+    location_source: "ZAP bbl-featurecollection",
   },
   {
     id: "2026K0002",
@@ -61,6 +64,9 @@ const records: DashboardRecord[] = [
     last_updated_date: "2026-10-01",
     activity_date: "2025-11-20",
     source_url: "https://zap.planning.nyc.gov/projects/2026K0002",
+    action_types: ["ZR"],
+    location_method: "point_on_zap_bbl_polygon",
+    location_source: "ZAP bbl-featurecollection",
   },
   {
     id: "2026Q0001",
@@ -84,6 +90,9 @@ const records: DashboardRecord[] = [
     last_updated_date: "2026-10-01",
     activity_date: "2026-09-30",
     source_url: "https://zap.planning.nyc.gov/projects/2026Q0001",
+    action_types: ["ZA"],
+    location_method: "point_on_zap_bbl_polygon",
+    location_source: "ZAP bbl-featurecollection",
   },
   {
     id: "2024M0001",
@@ -107,6 +116,9 @@ const records: DashboardRecord[] = [
     last_updated_date: "2026-10-01",
     activity_date: "2024-01-05",
     source_url: "https://zap.planning.nyc.gov/projects/2024M0001",
+    action_types: [],
+    location_method: "",
+    location_source: "",
   },
 ];
 
@@ -179,10 +191,19 @@ describe("dashboard analytics", () => {
     };
 
     expect(computeApplicantLeaderboard([...records, boundaryRecord], "2026-10-01T23:59:59Z")).toEqual([
-      { name: "Example Holdings LLC", applicationCount: 2 },
-      { name: "Boundary Applicant", applicationCount: 1 },
-      { name: "Civic Applicant", applicationCount: 1 },
+      { name: "Example Holdings LLC", applicationCount: 2, projects: [records[0], records[1]] },
+      { name: "Boundary Applicant", applicationCount: 1, projects: [boundaryRecord] },
+      { name: "Civic Applicant", applicationCount: 1, projects: [records[2]] },
     ]);
+  });
+
+  it("returns exactly the projects counted for each applicant leaderboard row", () => {
+    const leaderboard = computeApplicantLeaderboard(records, "2026-10-01");
+    for (const applicant of leaderboard) {
+      expect(applicant.projects).toHaveLength(applicant.applicationCount);
+      expect(applicant.projects.every((project) => project.primary_applicant === applicant.name)).toBe(true);
+    }
+    expect(leaderboard[0].projects.map((project) => project.id)).toEqual(["2026K0001", "2026K0002"]);
   });
 });
 
@@ -244,11 +265,38 @@ describe("public labels and disclosures", () => {
     expect(html).toContain("not necessarily the developer");
     expect(html).toContain("Data collected through");
     expect(html).toContain("Official ZAP record");
-    expect(html).toContain("<caption>Monthly application activity data</caption>");
-    expect(html).toContain("<th scope=\"col\">Month</th>");
+    expect(html).toContain("ZAP application activity map");
+    expect(html).toContain("Zoom 9–10: Community Districts");
+    expect(html).toContain("Borough activity by ZAP action type");
     expect(html).toContain("mobile-field-label\">Location");
     expect(html).toContain("expand-affordance\">View details");
     expect(html).not.toMatch(/Top Developers|Developer leaderboard/i);
+    expect(html).not.toMatch(/DOB permits?|building permits?/i);
+  });
+
+  it("renders applicant rows as keyboard-operable ARIA accordions with exact official project links", () => {
+    const html = renderToStaticMarkup(
+      <DashboardExplorer
+        payload={{
+          generated_at: "2026-10-02T12:00:00Z",
+          collected_through: "2026-10-01",
+          record_count: records.length,
+          source: {
+            name: "NYC Department of City Planning Zoning Application Portal",
+            url: "https://zap.planning.nyc.gov/projects",
+            api_url: "https://zap-api-production.herokuapp.com/projects",
+          },
+          records,
+        }}
+      />,
+    );
+
+    expect(html).toContain("aria-expanded=\"false\"");
+    expect(html).toContain("aria-controls=\"applicant-projects-example-holdings-llc\"");
+    expect(html).toContain("role=\"region\"");
+    expect(html).toContain("href=\"https://zap.planning.nyc.gov/projects/2026K0001\"");
+    expect(html).toContain("href=\"https://zap.planning.nyc.gov/projects/2026K0002\"");
+    expect(html).toContain("target=\"_blank\" rel=\"noreferrer noopener\"");
   });
 
   it("anchors the trailing-year view to the collection date, not export time", () => {
@@ -277,6 +325,8 @@ describe("public labels and disclosures", () => {
       />,
     );
 
-    expect(html.match(/Boundary Applicant/g)).toHaveLength(3);
+    expect(html).toContain("Boundary Applicant");
+    expect(html).toContain("aria-controls=\"applicant-projects-boundary-applicant\"");
+    expect(html).toContain("href=\"https://zap.planning.nyc.gov/projects/2025K0003\"");
   });
 });

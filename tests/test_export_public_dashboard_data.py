@@ -31,7 +31,14 @@ SEED_TABLE = """
         certified_referred TEXT,
         first_seen_date TEXT,
         last_updated_date TEXT,
-        newsletter_included TEXT
+        newsletter_included TEXT,
+        bbls_json TEXT,
+        bbl_featurecollection_json TEXT,
+        action_codes_json TEXT,
+        geography_location_method TEXT,
+        geography_location_source TEXT,
+        geography_enriched_at TEXT,
+        geography_status TEXT
     )
 """
 
@@ -41,7 +48,10 @@ SEED_ROW = """
         'Brooklyn', 'K08', 'Filed', 'ULURP', '26DCP001K', 'Unlisted',
         'EAS', 'Named Applicant LLC', 'Private', 0, 1,
         '2026-09-15', '2026-08-01', '2026-07-01', '2026-10-01',
-        'internal-only'
+        'internal-only', '["3012340056"]',
+        '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"bbl":"3012340056"},"geometry":{"type":"Polygon","coordinates":[[[-73.96,40.67],[-73.95,40.67],[-73.95,40.68],[-73.96,40.67]]]}}]}',
+        '["ZM"]', 'zap_bbl_polygon', 'ZAP bbl-featurecollection',
+        '2026-10-02T12:00:00+00:00', 'located'
     )
 """
 
@@ -63,6 +73,18 @@ class PublicDashboardExportTest(unittest.TestCase):
                 "api_url": "https://zap-api-production.herokuapp.com/projects",
             },
             "record_count": 1,
+            "boundaries": {
+                "boroughs": {"dataset_id": "gthc-hcne"},
+                "community_districts": {"dataset_id": "5crt-au7u"},
+            },
+            "map": {
+                "borough_counts": [{"id": "3", "name": "Brooklyn", "project_count": 1}],
+                "community_district_counts": [{"id": "308", "borough": "Brooklyn", "project_count": 1}],
+                "project_sites": {"type": "FeatureCollection", "features": []},
+                "located_project_count": 0,
+                "site_point_count": 0,
+                "unmatched_project_count": 1,
+            },
             "records": [
                 {
                     "id": "2026K0001",
@@ -86,6 +108,9 @@ class PublicDashboardExportTest(unittest.TestCase):
                     "last_updated_date": "2026-10-01",
                     "activity_date": "2026-09-15",
                     "source_url": "https://zap.planning.nyc.gov/projects/2026K0001",
+                    "action_types": [],
+                    "location_method": "",
+                    "location_source": "",
                 }
             ],
         }
@@ -119,7 +144,7 @@ class PublicDashboardExportTest(unittest.TestCase):
             self.assertEqual(payload["record_count"], 1)
             self.assertEqual(
                 set(payload),
-                {"generated_at", "collected_through", "source", "record_count", "records"},
+                {"generated_at", "collected_through", "source", "record_count", "boundaries", "map", "records"},
             )
             self.assertEqual(payload["source"]["name"], "NYC Department of City Planning Zoning Application Portal")
             self.assertEqual(payload["source"]["url"], "https://zap.planning.nyc.gov/projects")
@@ -132,11 +157,14 @@ class PublicDashboardExportTest(unittest.TestCase):
                     "ceqr_type", "eas_eis", "primary_applicant", "applicant_type",
                     "flood_zone_a", "flood_zone_shadedx", "milestone_date",
                     "certified_referred", "first_seen_date", "last_updated_date",
-                    "activity_date", "source_url",
+                    "activity_date", "source_url", "action_types", "location_method", "location_source",
                 },
             )
             self.assertEqual(record["activity_date"], "2026-09-15")
             self.assertEqual(record["source_url"], "https://zap.planning.nyc.gov/projects/2026K0001")
+            self.assertEqual(record["action_types"], ["ZM"])
+            self.assertEqual(record["location_method"], "zap_bbl_polygon")
+            self.assertEqual(payload["map"]["site_point_count"], 1)
             self.assertNotIn("newsletter_included", record)
             self.assertNotIn(str(db_path), json.dumps(payload))
 

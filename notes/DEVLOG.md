@@ -91,3 +91,56 @@ Live verification after the final CSS repair:
   grid; mobile rendered semantic field labels and detail affordances.
 - `npm test`, `npm run lint`, and `npm run build` passed before the service
   restart. No email or CRM action was performed.
+
+## 2026-10-14 — DEV-296, authoritative geography map and applicant drill-down
+
+Added a three-scale MapLibre geography view without changing ZapDash's activity
+dataset. Low zoom renders distinct-project borough counts, borough scale renders
+distinct-project Community District counts, and zoom 11+ renders only points
+derived from authoritative ZAP BBL polygons. Added complete action-type color
+legend, source/coverage disclosures, popups linked to official ZAP records, and
+an accessible geography table. Tracked simplified NYC Open Data borough and all
+59 numbered Community District boundaries as cartographic reference only.
+
+Expanded the trailing-12-month top-10 named-applicant list into keyboard-
+operable ARIA accordions. Each panel lists exactly the records used in that
+applicant's count and links every project to its official ZAP page. No external
+application, development, or permit dataset was introduced.
+
+Ran the constrained DB-only geography enrichment against the 216 existing
+application IDs. Results: 207 projects located, 8 returned without usable ZAP
+geometry, 1 stored ID was not found by the live API, and 0 API errors. The
+public snapshot reports 207 located projects, 425 authoritative site points,
+and 9 unmatched/unlocated projects. The operational table remained 216 rows
+with 216 distinct IDs.
+
+Final verification:
+
+- `npm test` — PASS: 17 Vitest tests and 13 Python unittests.
+- `npm run lint` — PASS with no errors or warnings.
+- `npm run build` — PASS: 216-record export/snapshot refresh, TypeScript, and
+  static prerender of `/`.
+- Snapshot-only `npm run build` with the operational DB temporarily absent —
+  PASS; output matched the tracked snapshot byte for byte, and the restored DB
+  checksum matched its pre-test checksum.
+- `git diff --check` — PASS.
+- Restarted the existing `zapdash.service` without changing its unit or port.
+  The enabled service is active on `127.0.0.1:9003`; local and tailnet requests
+  returned HTTP 200 with identical 839,798-byte HTML.
+- Live tailnet browser QA rendered the borough choropleth and high-zoom colored
+  ZAP site dots with no map error, 19 action legend entries, 55 geography
+  fallback rows, and all 10 applicant accordions. The first accordion declared
+  and listed exactly 8 projects. Desktop and 390×844 mobile checks had zero
+  horizontal overflow.
+
+No commit, push, CRM write, or email action was performed.
+
+## 2026-10-15 — light grayscale basemap
+
+Added `scripts/generate-basemap-style.cjs`, which writes the keyless
+`public/data/basemap-grayscale.json` used by `GeographyMap`. The style uses
+Esri World Light Gray raster tiles (light greyscale streets, water, and
+labels). A Protomaps vector approach was tried first and abandoned because
+build.protomaps.com sends no CORS headers (browser tile fetch fails) and
+`@protomaps/basemaps` 5.7.2 emits sparse-array holes in paint colors that
+MapLibre v5 strict validation rejects, aborting style load.

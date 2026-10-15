@@ -69,3 +69,25 @@ and the snapshot payload matches the canonical export exactly.
 
 No deploy, push, CRM write, or email action was performed; the tracked
 snapshot is uncommitted pending review.
+
+## 2026-10-14 — DEV-034, persistent dashboard launch
+
+Promoted ZapDash from a verified build to an always-on dashboard using the
+centrally assigned port 9003. Registered the live service in the shared port
+registry, created and enabled `zapdash.service`, bound Next.js to
+`127.0.0.1:9003`, and added a tailnet-only Tailscale Serve route at
+`https://vengeance.tail92bcba.ts.net:9003/`.
+
+Live verification after the final CSS repair:
+
+- Local and tailnet requests both returned HTTP 200 with the 580 KB rendered
+  page.
+- `zapdash.service` is enabled and active; the port registry reports ZapDash
+  ONLINE with the expected Next.js process.
+- Browser verification against the tailnet URL rendered the ZapDash title,
+  216 application detail controls, and 229 official ZAP links.
+- Desktop (800 px) and mobile (390 px) checks both reported zero horizontal
+  overflow after adding explicit minimum-width containment to the dashboard
+  grid; mobile rendered semantic field labels and detail affordances.
+- `npm test`, `npm run lint`, and `npm run build` passed before the service
+  restart. No email or CRM action was performed.

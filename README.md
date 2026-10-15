@@ -88,6 +88,16 @@ Deployment contract:
 (Do not rely on Vercel auto-deploy until the tracked snapshot has actually
 been committed; a clean checkout without it fails the build by design.)
 
+### Running service
+
+- Local: `http://127.0.0.1:9003`
+- Tailnet: `https://vengeance.tail92bcba.ts.net:9003/`
+- Service: `systemctl --user status zapdash.service`
+
+The persistent service is loopback-bound and exposed only through Tailscale
+Serve. Port 9003 is assigned in the central port registry; do not substitute a
+different port on conflict.
+
 ## Phase 1 dashboard
 - [x] Citywide tracked-application overview
 - [x] Borough and Community District activity trends and filters

@@ -45,7 +45,8 @@ h1 { margin: 0; max-width: 760px; font-family: Georgia, "Times New Roman", serif
 .freshness-card strong { display: block; margin: 8px 0 5px; font-family: Georgia, serif; font-size: 1.55rem; font-weight: 500; }
 .freshness-card small { font-size: .8rem; }
 
-.dashboard-stack { display: grid; gap: 48px; padding-block: 40px 72px; }
+.dashboard-stack { display: grid; min-width: 0; gap: 48px; padding-block: 40px 72px; }
+.dashboard-stack > * { min-width: 0; }
 .notice { border-left: 6px solid var(--orange); background: #fff6e7; padding: 20px 24px; box-shadow: var(--shadow); }
 .notice p { margin: 6px 0; color: #544d42; font-size: .9rem; line-height: 1.55; }
 .notice strong { color: var(--ink); }

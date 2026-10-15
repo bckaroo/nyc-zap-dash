@@ -1,7 +1,5 @@
 // ZapDash — Auto-generated narrative insights from chart data
 
-import { formatActionCode } from "./action-codes";
-import { ZAPProject } from "./zap";
 import {
   PipelineStage,
   HotspotData,

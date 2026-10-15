@@ -25,8 +25,12 @@ weekly newsletter freshness.
 - [Historical newsroom records and dashboard scope](docs/source-history/)
 - [Newsletter runbook](workflow/zap-newsletter-skill.md)
 
-Operational databases, weekly JSON, and generated drafts remain outside this
-repository in `projects/newsroom/zap-newsletter/`. They are not committed.
+Operational databases, weekly JSON, generated dashboard JSON, and draft output
+live under the repository's gitignored `data/` directory. They are local
+artifacts and are not committed. The one exception is
+`src/data/public-dashboard-data.json`, a tracked, privacy-safe snapshot of the
+same allowlisted export that makes clean-checkout builds work without the
+operational database.
 
 ## Data Source
 - **NYC OpenData**: [ZAP Project Data (hgx4-8ukb)](https://data.cityofnewyork.us/Housing-Development/Zoning-Application-Portal-ZAP-Project-Data/hgx4-8ukb)
@@ -34,15 +38,27 @@ repository in `projects/newsroom/zap-newsletter/`. They are not committed.
 - Updates: DCP refreshes regularly
 
 ## Stack
-- Next.js 15 (App Router, TypeScript)
+- Next.js 16 (App Router, TypeScript)
 - Tailwind CSS
-- Recharts
-- NYC OpenData SODA API
+- Static, privacy-safe JSON generated from the canonical SQLite cache
+- NYC Planning ZAP per-project API
 
 ## Development
 ```bash
 npm run dev
 ```
+
+The production build regenerates the public allowlisted feed automatically:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+`npm run build` runs `scripts/export-public-dashboard-data.py` before Next.js,
+so the dashboard is always built from the canonical local SQLite feed without
+hand-editing JSON.
 
 The collector can be run manually for recovery or verification:
 
@@ -54,17 +70,29 @@ It writes operational data to the established newsroom data directory by
 default. See the data contract before changing paths or the cron sequence.
 
 ## Deployment
-Push to `main` → Vercel auto-deploys (or run `npm run build`)
 
-## Features (v0)
-- [x] Total / active / completed project counts
-- [x] Application filings over time (monthly)
-- [x] Certifications/referrals over time (monthly)
-- [x] Projects by borough
-- [x] Projects by status
-- [x] Projects by applicant type
-- [ ] MIH trends
-- [ ] ULURP vs Non-ULURP breakdown
-- [ ] Community District drill-down
-- [ ] Search/filter by project
-- [ ] Map view
+The build never requires the operational SQLite database. `npm run build` runs
+`data:export` first: with the local canonical `data/zap-applications.db`
+present it regenerates the feed **and** refreshes the tracked snapshot at
+`src/data/public-dashboard-data.json`; without the database it falls back to
+the tracked snapshot, and fails with a clear error only if neither exists.
+
+Deployment contract:
+
+1. Locally run `npm run data:export` after a collector run, review the snapshot
+   diff, and commit `src/data/public-dashboard-data.json`.
+2. CI/Vercel builds from the committed snapshot — data freshness is the
+   snapshot's `generated_at`/`collected_through`, which the dashboard displays.
+3. The operational SQLite database stays out of Git.
+
+(Do not rely on Vercel auto-deploy until the tracked snapshot has actually
+been committed; a clean checkout without it fails the build by design.)
+
+## Phase 1 dashboard
+- [x] Citywide tracked-application overview
+- [x] Borough and Community District activity trends and filters
+- [x] Searchable application detail with official source links
+- [x] Trailing-12-month named-applicant activity leaderboard
+- [x] Source, freshness, coverage, and unofficial-product disclosures
+- [x] Responsive desktop/mobile presentation
+- [x] Automated analytics, labeling, and export-contract tests

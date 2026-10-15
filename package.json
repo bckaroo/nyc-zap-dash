@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run data:export && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "data:export": "python3 scripts/export-public-dashboard-data.py --update-snapshot",
+    "test": "vitest run && python3 -m unittest discover -s tests -p \"test_*.py\" -v"
   },
   "dependencies": {
     "date-fns": "^4.1.0",
@@ -23,6 +25,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",
-    "typescript": "5.8.2"
+    "typescript": "5.8.2",
+    "vitest": "^3.2.4"
   }
 }

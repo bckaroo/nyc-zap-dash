@@ -1,7 +1,7 @@
 // ZapDash — Extended data layer for pipeline velocity, action types, hotspots, MIH
 
-import { ZAPProject, fetchProjects, groupByMonth } from "./zap";
-import { ACTION_NAMES, formatActionCode } from "./action-codes";
+import { ZAPProject, groupByMonth } from "./zap";
+import { formatActionCode } from "./action-codes";
 
 // ─── Pipeline Velocity ───
 

@@ -45,6 +45,9 @@ next-env.d.ts
 public-dashboard-data.json
 zap-newsletter-draft-*.html
 
+# Tracked privacy-safe snapshot: refresh locally, review, then commit
+!src/data/public-dashboard-data.json
+
 # Python verification artifacts
 __pycache__/
 *.py[cod]

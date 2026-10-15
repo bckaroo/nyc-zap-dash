@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "npm run data:export && next build",
+    "build:pages": "NEXT_OUTPUT=export NEXT_PUBLIC_BASE_PATH=/nyc-zap-dash next build",
     "start": "next start",
     "lint": "eslint",
     "data:export": "python3 scripts/export-public-dashboard-data.py --update-snapshot",

@@ -9,6 +9,8 @@ import BoroughActionChart from "./BoroughActionChart";
 
 type BoundaryFeatureCollection = FeatureCollection<Polygon | MultiPolygon, Record<string, string | number>>;
 
+const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+
 const EMPTY_MAP: MapPayload = {
   borough_counts: [],
   community_district_counts: [],
@@ -67,8 +69,8 @@ export default function GeographyMap({
       try {
         const maplibregl = await import("maplibre-gl");
         const [boroughResponse, districtResponse] = await Promise.all([
-          fetch("/data/nyc-boroughs.geojson"),
-          fetch("/data/nyc-community-districts.geojson"),
+          fetch(`${BASE_PATH}/data/nyc-boroughs.geojson`),
+          fetch(`${BASE_PATH}/data/nyc-community-districts.geojson`),
         ]);
         if (!boroughResponse.ok || !districtResponse.ok) throw new Error("Boundary files could not be loaded");
         const [boroughBoundaries, districtBoundaries] = await Promise.all([
@@ -93,7 +95,7 @@ export default function GeographyMap({
           minZoom: 8,
           maxZoom: 17,
           attributionControl: false,
-          style: "/data/basemap-grayscale.json",
+          style: `${BASE_PATH}/data/basemap-grayscale.json`,
         });
         mapRef.current = map;
         map.on("error", (event) => { console.error("maplibre error:", (event as { error?: Error }).error?.message || String(event)); });

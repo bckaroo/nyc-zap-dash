@@ -411,7 +411,8 @@ def build_candidate_ids(db_conn, scan_years, scan_range):
     return ids
 
 
-def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose):
+def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose,
+        workers=1):
     now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
     week_start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -440,20 +441,27 @@ def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose):
     completed = 0
     errors = 0
     api_failures = 0
-    seen = set()
 
-    for pid in sorted(candidate_ids):
-        if pid in seen:
-            continue
-        seen.add(pid)
+    # Unique, deterministic candidate order; a set-based dedupe with no side effects.
+    todo = sorted(set(candidate_ids))
+
+    def _fetch_one(pid):
+        result = fetch_project(pid, verbose=False)
+        # Pace only successful bodies; 404 scan misses and errors are cheap.
+        if result is not None and result != "ERR":
+            time.sleep(SLEEP_BETWEEN_CALLS)
+        return pid, result
+
+    def _absorb(pid, result):
+        """Main-thread consumer: all SQLite writes stay here (sqlite3 is not shared)."""
+        nonlocal fetched, completed, errors, api_failures
         fetched += 1
-        result = fetch_project(pid, verbose)
         if result is None:
-            continue  # 404 scan miss
+            return  # 404 scan miss
         if result == "ERR":
             errors += 1
             api_failures += 1
-            continue
+            return
         attrs = result.get("data", {}).get("attributes", {})
         status = safe_str(attrs.get("dcp-publicstatus"))
         if status in COMPLETED_STATUSES:
@@ -461,16 +469,27 @@ def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose):
             # Still record it so we stop re-fetching forever
             row = extract_project_data(pid, result)
             upsert(conn, row, today)
-            continue
+            return
         row = extract_project_data(pid, result)
         upsert(conn, row, today)
         active.append(row)
         log(f"  OK {pid} | {row['project_name'][:45]} | {status}", verbose)
-        time.sleep(SLEEP_BETWEEN_CALLS)
         if verbose and fetched % 50 == 0:
-            print(f"  ...{fetched}/{len(candidate_ids)} fetched, "
+            print(f"  ...{fetched}/{len(todo)} fetched, "
                   f"{len(active)} active, {completed} done, {errors} err",
                   flush=True)
+
+    if workers > 1:
+        import concurrent.futures as cf
+        with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(_fetch_one, pid) for pid in todo]
+            for future in cf.as_completed(futures):
+                pid, result = future.result()
+                _absorb(pid, result)
+    else:
+        for pid in todo:
+            pid, result = _fetch_one(pid)
+            _absorb(pid, result)
 
     conn.commit()
 
@@ -546,6 +565,9 @@ if __name__ == "__main__":
     parser.add_argument("--scan-range", type=int, default=DEFAULT_SCAN_RANGE)
     parser.add_argument("--lookback", type=int, default=60,
                         help="Milestone lookback window (days) for DB freshness")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Parallel API fetch threads (default 1 = serial). "
+                             "DB writes stay on the main thread.")
     parser.add_argument(
         "--enrich-geography-only",
         action="store_true",
@@ -558,4 +580,4 @@ if __name__ == "__main__":
         enrich_existing_projects(args.db, args.verbose)
     else:
         run(args.db, args.output, args.scan_years, args.scan_range,
-            args.lookback, args.verbose)
+            args.lookback, args.verbose, workers=max(1, args.workers))

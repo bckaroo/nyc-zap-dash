@@ -144,3 +144,56 @@ labels). A Protomaps vector approach was tried first and abandoned because
 build.protomaps.com sends no CORS headers (browser tile fetch fails) and
 `@protomaps/basemaps` 5.7.2 emits sparse-array holes in paint colors that
 MapLibre v5 strict validation rejects, aborting style load.
+
+## 2026-11-01 — DEV-52001–DEV-52004, dashboard staleness and pipeline closure
+
+Closed the two broken links in the weekly chain: nothing failed when the tracked
+snapshot went stale, and nothing refreshed it after the collector ran.
+
+- **DEV-52001 — staleness gate (commit 0fa24ff).** `scripts/check-snapshot-freshness.py`
+  reads `collected_through` from `src/data/public-dashboard-data.json` and fails when
+  it is more than `--max-days` (default 10) behind a reference date. Wired into
+  `.github/workflows/deploy-pages.yml` as its own step after `npm ci`, with
+  `--as-of "${{ github.event.head_commit.timestamp || github.run_started_at }}"`.
+  The reference is the **commit/build date, not the runtime date**, so re-running an
+  old commit cannot silently pass. `tests/test_check_snapshot_freshness.py` covers
+  fresh, exactly-at-limit, stale, missing and unreadable snapshots plus the
+  `--max-days` override and the default path.
+- **DEV-52002 — `--workers` (commit 36d8d8f).** `scripts/zap-collector.py run()` now
+  takes `workers` (default 1, so behaviour is unchanged) and fetches candidates in a
+  `ThreadPoolExecutor`. `_fetch_one` does network only; every SQLite write stays on
+  the main thread in `_absorb`, because a shared `sqlite3` connection is not
+  thread-safe. `SLEEP_BETWEEN_CALLS` now paces successful bodies only — 404 scan
+  misses are free. `tests/test_zap_collector_workers.py` asserts serial and
+  `--workers 2` produce identical rows, totals and week pool (timestamps excluded).
+- **DEV-52003 — weekly snapshot PR.** `~/.hermes/profiles/ops/scripts/zap-snapshot-pr.sh`
+  (Hermes cron `6a38ad31e5c2`, `15 6 * * 1`, America/New_York, no-agent, delivered to
+  bot-chat:ops — runs 15 minutes after the 06:00 collector). It re-exports the
+  snapshot from the canonical DB; if it changed, it commits to `snapshot/dashboard-<date>`,
+  opens a PR, merges (auto-merge, falling back to a direct squash merge when the repo
+  does not allow auto-merge), and then **verifies the Pages run by matching the merge
+  commit SHA** rather than accepting that "a run exists". First live run:
+  PR #1 → squash-merged `bf87557` → run 41360512800, `success`. Failures are loud
+  (non-zero exit, no silent skip) for missing gh auth, missing DB, or an unrelated
+  dirty tracked tree.
+- **DEV-52004 — archive the duplicate newsroom pipeline.** Moved
+  `projects/newsroom/zap-newsletter/` to
+  `projects/newsroom/_archived/zap-newsletter-2026-11-01/` and added `DEPRECATED.md`
+  naming `dev/zap` as the only runnable pipeline. Nothing was deleted, and no cron
+  job, script or skill in the ops profile referenced the old path.
+
+Verification: `npm test` — 18 JS tests pass, 29 Python tests pass, "OK". Collector
+worker parity suite 3/3 in 14.16s (template-DB setup: `init_db` issues one
+`ALTER TABLE` per column at ~0.2s of fsync each on this filesystem, so the schema is
+built once per class and copied per test instead of rebuilt 26 times).
+
+Deviations accepted, recorded as follow-ups (not blockers):
+
+- `zap-snapshot-pr.sh` lives at `~/.hermes/profiles/ops/scripts/` per the plan's
+  artifact map, so it is **not versioned in this repo** and can drift from `main`
+  without anyone noticing. Consider committing a copy under `scripts/` and having
+  the cron job exec that, leaving the profile path as a thin wrapper.
+- The job opens a PR on **every** run, including weeks where no application data
+  changed, because the exporter always rewrites `generated_at`. That keeps the
+  freshness disclosure honest but is weekly PR noise; a future refinement is to
+  compare everything except `generated_at` and skip when only that moved.

@@ -27,6 +27,14 @@ jobs:
         with:
           python-version: "3.x"
       - run: npm ci
+      - name: Fail if the tracked snapshot is stale
+        # The build falls back to the committed snapshot (CI has no data/ DB), so a
+        # green deploy can ship old data. Compare collected_through against the
+        # COMMIT date, not the runtime clock, so re-running an old workflow still
+        # measures the commit's own freshness rather than today's.
+        env:
+          COMMIT_TS: ${{ github.event.head_commit.timestamp || github.run_started_at }}
+        run: python3 scripts/check-snapshot-freshness.py --as-of "$COMMIT_TS" --max-days 10
       - name: Build static export from the tracked privacy-safe snapshot
         env:
           NEXT_OUTPUT: export

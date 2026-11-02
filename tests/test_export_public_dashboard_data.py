@@ -1,4 +1,6 @@
 import datetime as dt
+import contextlib
+import io
 import json
 import runpy
 import sqlite3
@@ -515,6 +517,54 @@ class CollectorStateExportTest(unittest.TestCase):
                 set(collector),
                 {"last_success_at", "last_run_at", "last_status", "last_records_upserted"},
             )
+
+    def test_pre_ledger_database_says_so_rather_than_looking_like_a_read_failure(self) -> None:
+        # A null block is ambiguous: "no ledger table yet" and "could not read the ledger"
+        # both publish four nulls. Whoever signs off on Monday reads the artifact, not
+        # stderr, so the read has to distinguish the two cases out loud.
+        read_collector_state = runpy.run_path(str(EXPORTER))["read_collector_state"]
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "zap.db"
+            with sqlite3.connect(db_path) as connection:
+                connection.execute(SEED_TABLE)
+                connection.execute(SEED_ROW)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                collector = read_collector_state(db_path)
+            self.assertEqual(
+                set(collector),
+                {"last_success_at", "last_run_at", "last_status", "last_records_upserted"},
+            )
+            self.assertIsNone(collector["last_status"])
+            message = stderr.getvalue()
+            self.assertIn("no zap_collector_runs table", message)
+            self.assertIn("pre-ledger", message)
+            self.assertNotIn("warning:", message)
+
+    def test_unreadable_ledger_is_reported_as_a_read_failure(self) -> None:
+        # A corrupt file is not a pre-ledger database. If the export cannot see the ledger
+        # at all it must say so: the gate would otherwise drop to the staleness window and
+        # the run would go green on one live assertion with the other three dormant.
+        read_collector_state = runpy.run_path(str(EXPORTER))["read_collector_state"]
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "zap.db"
+            db_path.write_bytes(b"this is not a sqlite database" * 100)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                collector = read_collector_state(db_path)
+            self.assertIsNone(collector["last_success_at"])
+            message = stderr.getvalue()
+            self.assertIn("warning:", message)
+            self.assertIn("read failure, not a pre-ledger database", message)
+
+    def test_missing_database_is_announced_and_still_publishes_nulls(self) -> None:
+        read_collector_state = runpy.run_path(str(EXPORTER))["read_collector_state"]
+        with tempfile.TemporaryDirectory() as tmp:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                collector = read_collector_state(Path(tmp) / "absent.db")
+            self.assertIsNone(collector["last_run_at"])
+            self.assertIn("no database at", stderr.getvalue())
 
 
 class CollectorBlockValidationTest(unittest.TestCase):

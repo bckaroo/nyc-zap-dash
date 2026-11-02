@@ -570,3 +570,19 @@ already covers the loud case.
   takes its documented pre-ledger fallback. "The gate passes" overstates this week's green;
   "one live assertion and three dormant ones" is the honest sentence, and it is what belongs
   in the CI history next to the run.
+
+- **Monday readback: an all-null collector block is a question, not an answer.** The
+  payload publishes four nulls for two unrelated situations — the database predates the
+  ledger, or the ledger could not be read at all — because a read failure must not break an
+  export. The artifact cannot tell them apart, and the second case is the one that matters:
+  the gate would fall back to `collected_through`, go green on the staleness check, and leave
+  the liveness assertion dormant. So the procedure gains one line, before anyone writes
+  "pre-ledger" next to a null block:
+
+  > `python3 -c "import sqlite3;c=sqlite3.connect('data/zap-applications.db');print([r for r in c.execute(\"select name from sqlite_master where type='table'\")]);print(c.execute('select count(*) from zap_collector_runs').fetchone())"`
+
+  Table present and rows counting up is a real ledger read; table absent is genuinely
+  pre-ledger; a `sqlite3.Error` from that command is a ledger nobody can see, and the run
+  stops there rather than shipping a green. The export now writes the same distinction to
+  stderr (`note:` for absent, `warning:` for unreadable) precisely so the operator does not
+  have to reverse-engineer it, but stderr is not the artifact — the query is the check.

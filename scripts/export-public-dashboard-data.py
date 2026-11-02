@@ -8,6 +8,7 @@ import json
 import math
 import re
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -343,6 +344,13 @@ def read_collector_state(db_path: Path) -> dict[str, Any]:
     Never derive "did this run finish" from ``finished_at`` arithmetic, and never read
     recency off ``last_run_at``. Key both on ``status`` plus ``last_success_at``, which
     only ever comes from a row that recorded 'ok'. The freshness gate does exactly that.
+
+    A null block is ambiguous by construction -- "pre-ledger database" and "could not read
+    the ledger" produce the same four nulls -- so both paths say which one they took on
+    stderr. Nothing about that reaches the published artifact; it is for whoever is
+    reading an all-null block and has to decide whether the collector is dead or merely
+    predates the ledger. The check is ``sqlite_master`` for ``zap_collector_runs`` and the
+    row count, not the shape of the payload.
     """
     state: dict[str, Any] = {
         "last_success_at": None,
@@ -351,6 +359,10 @@ def read_collector_state(db_path: Path) -> dict[str, Any]:
         "last_records_upserted": None,
     }
     if not db_path.is_file():
+        print(
+            f"note: no database at {db_path}; publishing a null collector block",
+            file=sys.stderr,
+        )
         return state
     try:
         with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as connection:
@@ -361,6 +373,14 @@ def read_collector_state(db_path: Path) -> dict[str, Any]:
                 )
             }
             if "zap_collector_runs" not in tables:
+                # Legitimate for a database that predates the ledger: the gate then falls
+                # back to collected_through. Say so, because "absent" and "unreadable"
+                # both publish four nulls and an operator must be able to tell them apart.
+                print(
+                    f"note: {db_path} has no zap_collector_runs table (pre-ledger"
+                    " database); publishing a null collector block",
+                    file=sys.stderr,
+                )
                 return state
             rows = connection.execute(
                 "SELECT started_at, finished_at, records_upserted, status"
@@ -378,7 +398,15 @@ def read_collector_state(db_path: Path) -> dict[str, Any]:
             ).fetchone()
             if success is not None:
                 state["last_success_at"] = clean(success[0])
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        # A locked or corrupt ledger must not break the export, but it also must not be
+        # mistaken for the pre-ledger fallback: the gate would drop to staleness and the
+        # run would go green on one live assertion. Name the failure on stderr.
+        print(
+            f"warning: cannot read the run ledger at {db_path} ({exc}); publishing a"
+            " null collector block -- this is a read failure, not a pre-ledger database",
+            file=sys.stderr,
+        )
         return state
     return state
 

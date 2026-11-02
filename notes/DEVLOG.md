@@ -343,3 +343,19 @@ landed, so the numbers below come from the shipped data rather than a fixture:
   360px the card has zero overflowing descendants (panel width 321px); the only
   horizontal overflow on the page is the map panel's error text, which predates
   this change.
+
+Pushed to `main` as `af65aaa` and verified on the PUBLIC Pages copy
+(`https://bckaroo.github.io/nyc-zap-dash/`, deploy run 41394445580, success):
+
+- Rendered HTML carries the card heading, the trailing/prior/change metric row
+  and the `trend-dimension` radio group ("Application type" / "Applicant type").
+- In a real browser, stack heights measure 25, 9, 11, 14, 14, 11, 8, 5, 8, 5, 2
+  (Nov '26 empty) against the 9.857 px/application axis scale = 112, matching
+  the trailing metric; the toggle swaps to developer / city agency / nonprofit
+  colours and keeps the same 112.
+- Measurement note: Recharts animates stack heights, and a headless tab that
+  never paints freezes mid-animation (heights read ~41% of final). Take a
+  screenshot between measurements before reading bar geometry.
+
+Still outstanding (operator): bounce `zapdash.service` so 127.0.0.1:9003 serves
+the new bundle - unattended runs cannot perform service lifecycle actions.

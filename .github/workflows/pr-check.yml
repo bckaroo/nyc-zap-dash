@@ -35,8 +35,16 @@ jobs:
         # Same contract as deploy-pages.yml: compare collected_through against
         # the COMMIT date, never the runtime clock, so re-running an old PR
         # still measures that commit's freshness instead of today's.
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          head_sha=$(git rev-parse HEAD)
+          if [ "$head_sha" != "$PR_HEAD_SHA" ]; then
+            echo "ERROR: checked out ${head_sha}, expected PR head ${PR_HEAD_SHA}."
+            echo "The freshness gate must measure the PR's own commit."
+            exit 1
+          fi
           commit_ts=$(git log -1 --format=%cI HEAD)
-          echo "PR head: ${GITHUB_SHA} at ${commit_ts}"
+          echo "PR head commit: ${head_sha} at ${commit_ts}"
           python3 scripts/check-snapshot-freshness.py --as-of "$commit_ts" --max-days 10

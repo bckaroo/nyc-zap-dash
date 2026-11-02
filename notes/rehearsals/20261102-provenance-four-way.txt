@@ -1,0 +1,55 @@
+Provenance and liveness rehearsal — four cases ops asked for, plus the error-status case.
+Run against main a837c4a, checker scripts/check-snapshot-freshness.py, --as-of 2026-11-02.
+Fixtures are the real 242-record export with only generated_at and the collector block mutated.
+
+========================================================================
+1. hung run — every date fresh, run never finished   (the hole ops rehearsed)
+snapshot: c1.json
+========================================================================
+OK (fresh): collected_through=2026-11-02 as_of=2026-11-02, snapshot is 0 day(s) old (max 10).
+OK (live): last successful collector run 2026-10-26 is 7 day(s) before as_of (max 8). last_run_at=2026-11-02T06:00:00+00:00 status=running records=0
+FAIL (snapshot not produced by that run): exported 2026-11-02T06:45:00+00:00, but the last successful collector run had already finished 2026-10-26T06:10:00+00:00 -- a lag of 168.6 hour(s) (max 24). last_run_at=2026-11-02T06:00:00+00:00 status=running records=0
+The data in this snapshot was not written by a run that was live when it was exported: the most likely cause is a collector run that hung and never recorded completion, which leaves last_success_at a full cycle behind and still inside the collector-age window.
+Fix: confirm the collector process is alive, then --
+  python3 scripts/zap-collector.py
+  python3 scripts/export-public-dashboard-data.py --update-snapshot
+EXIT=1
+
+========================================================================
+2. healthy export
+snapshot: c2.json
+========================================================================
+OK (fresh): collected_through=2026-11-02 as_of=2026-11-02, snapshot is 0 day(s) old (max 10).
+OK (live): last successful collector run 2026-11-02 is 0 day(s) before as_of (max 8). last_run_at=2026-11-02T06:10:00+00:00 status=ok records=226
+OK (provenance): exported 2026-11-02T06:45:00+00:00, 0.6 hour(s) after the last successful run completed (max 24).
+EXIT=0
+
+========================================================================
+3. missing generated_at
+snapshot: c3.json
+========================================================================
+OK (fresh): collected_through=2026-11-02 as_of=2026-11-02, snapshot is 0 day(s) old (max 10).
+OK (live): last successful collector run 2026-11-02 is 0 day(s) before as_of (max 8). last_run_at=2026-11-02T06:10:00+00:00 status=ok records=226
+OK (provenance): snapshot carries no generated_at, so the export cannot be tied to the run that produced it; skipping the export-lag assertion.
+EXIT=0
+
+========================================================================
+4. export predates the last success
+snapshot: c4.json
+========================================================================
+OK (fresh): collected_through=2026-11-02 as_of=2026-11-02, snapshot is 0 day(s) old (max 10).
+OK (live): last successful collector run 2026-11-02 is 0 day(s) before as_of (max 8). last_run_at=2026-11-02T06:10:00+00:00 status=ok records=226
+OK (provenance): snapshot was exported 311.4 hour(s) BEFORE the last successful run completed (2026-10-20T06:45:00+00:00 vs 2026-11-02T06:10:00+00:00); a later run can only have improved the data, so this is not a provenance failure.
+EXIT=0
+
+========================================================================
+5. run recorded status=error   (the hole ops asked for first)
+snapshot: c5.json
+========================================================================
+OK (fresh): collected_through=2026-11-02 as_of=2026-11-02, snapshot is 0 day(s) old (max 10).
+FAIL (collector run failed): the most recent collector run recorded status=error. last_run_at=2026-11-02T06:10:00+00:00 status=error records=0
+The snapshot still carries the dates of the last successful run, so the staleness and collector-age assertions cannot see this on their own.
+Fix: get the collector running again, then --
+  python3 scripts/zap-collector.py
+  python3 scripts/export-public-dashboard-data.py --update-snapshot
+EXIT=1

@@ -431,3 +431,29 @@ already covers the loud case.
   Red test on PR #9 (`de0bd6e`, reverted `a7aaa70`): the tracked snapshot mutated into the hang shape
   — every date fresh, `status=running`, `last_success_at` a cycle back — failed
   in 4s on provenance alone while staleness and liveness both printed OK.
+
+- Follow-up `ea069bc` (PR #11): the payload carries the evidence ops asked for, rather
+  than the gate inferring it. `collector.exported_at` is the exporter's own clock (it
+  equals the payload's `generated_at`) and `collector.recent_runs` is the newest eight
+  runs, newest first, each `{started_at, finished_at, status, records_upserted}`. The
+  four summary fields are unchanged. Two reasons it is the payload's job and not the
+  gate's:
+
+  `exported_at - last_success_at` is the hang discriminator expressed as data rather
+  than as an assertion — minutes when the exporter follows a live collector, a full
+  cycle when it follows a run that never finished. A consumer can compute it without
+  knowing our defaults.
+
+  `recent_runs` lets a zero-upsert streak be judged from the artifact instead of
+  inferred from a single row. Ops had called per-run history superseded; they reversed
+  that when they saw they needed the streak, and reversal is theirs to make — eight
+  rows is two months of weekly coverage and still small enough to serve to a browser,
+  so the payload stays a snapshot and unbounded history stays in the database.
+
+  A run that never finished exports `finished_at: ""`, the payload's existing convention
+  for absent values, so a hang is visible without inventing a timestamp. Fields absent
+  from an older export stay valid, `validate_collector_state` rejects a malformed run
+  list at export time rather than turning a downstream liveness check into a
+  `TypeError`, and the tracked snapshot is deliberately not regenerated here — it gains
+  the new shape on the next real collector run. Suite at 70.
+

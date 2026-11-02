@@ -427,111 +427,14 @@ class CollectorStateExportTest(unittest.TestCase):
                     "last_run_at": None,
                     "last_status": None,
                     "last_records_upserted": None,
-                    "exported_at": "2026-11-02T12:00:00+00:00",
-                    "recent_runs": [],
                 },
             )
 
-    def test_exported_at_is_the_exporters_own_clock(self) -> None:
-        # exported_at must be the moment the payload was built, not the collector's:
-        # the gate measures it against last_success_at to catch a run that hung.
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db_path = tmp_path / "zap.db"
-            self._seed(
-                db_path,
-                [("2026-10-26T06:45:00+00:00", "2026-10-26T07:02:00+00:00", 240, "ok", None)],
-            )
-            payload = self._export(db_path, tmp_path / "dashboard.json")
-            self.assertEqual(payload["collector"]["exported_at"], payload["generated_at"])
-            self.assertEqual(payload["collector"]["exported_at"], "2026-11-02T12:00:00+00:00")
-
-    def test_recent_runs_are_newest_first_and_capped(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db_path = tmp_path / "zap.db"
-            runs = [
-                (f"2026-{(10 - index // 4):02d}-{1 + index % 4:02d}T06:45:00+00:00",
-                 f"2026-{(10 - index // 4):02d}-{1 + index % 4:02d}T07:00:00+00:00",
-                 index, "ok", None)
-                for index in range(11)
-            ]
-            self._seed(db_path, runs)
-            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
-            self.assertEqual(len(collector["recent_runs"]), 8)
-            self.assertEqual(
-                collector["recent_runs"][0]["records_upserted"], 10
-            )  # newest row last inserted
-            self.assertEqual(
-                [run["records_upserted"] for run in collector["recent_runs"]],
-                [10, 9, 8, 7, 6, 5, 4, 3],
-            )
-            self.assertEqual(
-                set(collector["recent_runs"][0]),
-                {"started_at", "finished_at", "status", "records_upserted"},
-            )
-
-    def test_hung_run_is_visible_alongside_the_last_success(self) -> None:
-        # ops' case: the newest row never finished, so its finished_at is empty and
-        # the last success is a cycle back. exported_at is what makes that visible.
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db_path = tmp_path / "zap.db"
-            self._seed(
-                db_path,
-                [
-                    ("2026-10-26T06:45:00+00:00", "2026-10-26T07:02:00+00:00", 240, "ok", None),
-                    ("2026-11-02T06:45:00+00:00", None, 0, "running", None),
-                ],
-            )
-            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
-            self.assertEqual(collector["last_status"], "running")
-            self.assertEqual(collector["last_success_at"], "2026-10-26T07:02:00+00:00")
-            self.assertEqual(collector["recent_runs"][0]["status"], "running")
-            self.assertEqual(collector["recent_runs"][0]["finished_at"], "")
-            self.assertEqual(collector["recent_runs"][0]["started_at"], "2026-11-02T06:45:00+00:00")
-
-    def test_swept_row_publishes_declaration_time_and_cannot_pass_for_activity(self) -> None:
-        # The sweep writes the *next* run's start into finished_at, so a swept row's
-        # duration is how long it went unnoticed, not how long it ran. The payload must
-        # therefore show a week-long "run" without that implying any activity: recency
-        # lives in last_success_at, which still points at the previous good run.
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db_path = tmp_path / "zap.db"
-            self._seed(
-                db_path,
-                [
-                    ("2026-10-26T06:45:00+00:00", "2026-10-26T07:02:00+00:00", 240, "ok", None),
-                    (
-                        "2026-10-26T06:45:00+00:00",
-                        "2026-11-02T06:45:00+00:00",
-                        0,
-                        "error",
-                        "run did not finish (no completion record)",
-                    ),
-                    ("2026-11-02T06:45:00+00:00", None, 0, "running", None),
-                ],
-            )
-            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
-            swept = collector["recent_runs"][1]
-            self.assertEqual(swept["status"], "error")
-            self.assertEqual(swept["finished_at"], "2026-11-02T06:45:00+00:00")
-            self.assertEqual(swept["finished_at"], collector["last_run_at"])
-            # Seven days of apparent duration that mean nothing, published as-is.
-            self.assertEqual(
-                (
-                    dt.datetime.fromisoformat(swept["finished_at"])
-                    - dt.datetime.fromisoformat(swept["started_at"])
-                ).total_seconds(),
-                7 * 24 * 3600,
-            )
-            # last_run_at is the newest run's start; the last *success* is a cycle back.
-            self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:00+00:00")
-            self.assertEqual(collector["last_success_at"], "2026-10-26T07:02:00+00:00")
-            self.assertEqual(collector["last_status"], "running")
-
-    def test_zero_upsert_streak_is_readable_from_the_payload(self) -> None:
+    def test_collector_block_publishes_four_summary_fields_and_no_run_history(self) -> None:
+        # Ops' call, final: the block is the four summary fields. Run history is a
+        # query against the ledger, not a published field -- it would be a permanent
+        # commitment to every consumer for a diagnostic the gate already encodes in
+        # its own failure message.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             db_path = tmp_path / "zap.db"
@@ -544,13 +447,72 @@ class CollectorStateExportTest(unittest.TestCase):
             )
             collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
             self.assertEqual(
-                [run["records_upserted"] for run in collector["recent_runs"]], [0, 240]
+                set(collector),
+                {"last_success_at", "last_run_at", "last_status", "last_records_upserted"},
             )
-            self.assertTrue(all(run["status"] == "ok" for run in collector["recent_runs"]))
+            self.assertNotIn("recent_runs", collector)
+            self.assertNotIn("exported_at", collector)
+
+    def test_hung_run_is_visible_alongside_the_last_success(self) -> None:
+        # ops' case: the newest row never finished. The payload shows a newest run in
+        # 'running' with last_success_at a cycle back, which is the whole signal -- the
+        # gate measures the last success, so no per-row history is needed to see it.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "zap.db"
+            self._seed(
+                db_path,
+                [
+                    ("2026-10-26T06:45:00+00:00", "2026-10-26T07:02:00+00:00", 240, "ok", None),
+                    ("2026-11-02T06:45:00+00:00", None, 0, "running", None),
+                ],
+            )
+            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
+            self.assertEqual(collector["last_status"], "running")
+            self.assertEqual(collector["last_success_at"], "2026-10-26T07:02:00+00:00")
+            self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:00+00:00")
+            self.assertEqual(collector["last_records_upserted"], 0)
+
+    def test_swept_row_cannot_pass_for_activity(self) -> None:
+        # The sweep writes the *next* run's start into the swept row's finished_at, so a
+        # run that hung is declared dead a week later. The payload publishes that
+        # declaration time as last_run_at, which therefore looks freshly touched while
+        # the work behind it is a cycle old. Recency must be read off last_success_at,
+        # which only ever comes from a row that recorded 'ok' -- never off last_run_at.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "zap.db"
+            self._seed(
+                db_path,
+                [
+                    ("2026-10-19T06:45:00+00:00", "2026-10-19T07:02:00+00:00", 240, "ok", None),
+                    (
+                        "2026-10-26T06:45:00+00:00",
+                        "2026-11-02T06:45:00+00:00",
+                        0,
+                        "error",
+                        "run did not finish (no completion record)",
+                    ),
+                    ("2026-11-02T06:45:00+00:00", None, 0, "running", None),
+                ],
+            )
+            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
+            # last_run_at is the newest run's start, i.e. the sweeping run -- fresh.
+            self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:00+00:00")
+            # The last success is two cycles back, behind the swept row. That is the
+            # only field that carries recency, and it cannot be fooled by the sweep.
+            self.assertEqual(collector["last_success_at"], "2026-10-19T07:02:00+00:00")
+            self.assertEqual(collector["last_status"], "running")
+            # Two cycles of gap: last_run_at is fresh, the work behind it is not.
+            gap_days = (
+                dt.datetime.fromisoformat(collector["last_run_at"])
+                - dt.datetime.fromisoformat(collector["last_success_at"])
+            ).total_seconds() / 86400.0
+            self.assertGreater(gap_days, 13)
 
 
-class CollectorStateValidationTest(unittest.TestCase):
-    """Malformed collector metadata must fail at export, not at the gate."""
+class CollectorBlockValidationTest(unittest.TestCase):
+    """The collector block is optional provenance, and must be an object when present."""
 
     def setUp(self) -> None:
         self.validate = runpy.run_path(str(EXPORTER))["validate_payload"]
@@ -561,8 +523,6 @@ class CollectorStateValidationTest(unittest.TestCase):
             "last_run_at": "2026-11-02T07:01:00+00:00",
             "last_status": "ok",
             "last_records_upserted": 3,
-            "exported_at": "2026-11-02T12:00:00+00:00",
-            "recent_runs": [],
         }
         state.update(collector)
         return {
@@ -582,51 +542,18 @@ class CollectorStateValidationTest(unittest.TestCase):
     def test_well_formed_collector_passes(self) -> None:
         self.validate(self._payload())
 
-    def test_accepts_a_trailing_z(self) -> None:
-        self.validate(self._payload(exported_at="2026-11-02T12:00:00Z"))
-
-    def test_rejects_more_than_eight_runs(self) -> None:
-        run = {
-            "started_at": "2026-11-02T06:45:00+00:00",
-            "finished_at": "2026-11-02T07:01:00+00:00",
-            "status": "ok",
-            "records_upserted": 2,
-        }
+    def test_rejects_collector_metadata_that_is_not_an_object(self) -> None:
+        payload = self._payload()
+        payload["collector"] = ["last_status"]
         with self.assertRaises(ValueError):
-            self.validate(self._payload(recent_runs=[run] * 9))
+            self.validate(payload)
 
-    def test_rejects_an_unknown_status(self) -> None:
-        with self.assertRaises(ValueError):
-            self.validate(
-                self._payload(
-                    recent_runs=[
-                        {
-                            "started_at": "2026-11-02T06:45:00+00:00",
-                            "finished_at": "",
-                            "status": "crashed",
-                            "records_upserted": 0,
-                        }
-                    ]
-                )
-            )
-
-    def test_rejects_a_run_missing_a_field(self) -> None:
-        with self.assertRaises(ValueError):
-            self.validate(
-                self._payload(
-                    recent_runs=[
-                        {
-                            "started_at": "2026-11-02T06:45:00+00:00",
-                            "status": "ok",
-                            "records_upserted": 0,
-                        }
-                    ]
-                )
-            )
-
-    def test_rejects_a_non_iso_exported_at(self) -> None:
-        with self.assertRaises(ValueError):
-            self.validate(self._payload(exported_at="last Tuesday"))
+    def test_accepts_a_payload_with_no_collector_block(self) -> None:
+        # An older snapshot still validates: the block is provenance, not a
+        # prerequisite, and its absence must not turn into an export failure.
+        payload = self._payload()
+        payload.pop("collector")
+        self.validate(payload)
 
 
 if __name__ == "__main__":

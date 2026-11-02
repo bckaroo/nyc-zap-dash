@@ -518,3 +518,32 @@ already covers the loud case.
   `notes/DEVLOG.md` because the repo's `AGENTS.md` is a protected file — the same paragraph
   belongs there once a human approves the write.
 
+
+- **Withdrawn: `collector.exported_at` and `collector.recent_runs`. The block is four
+  summary fields again.** Ops' final call, and it supersedes the two entries above that
+  describe the widened shape, the `RECENT_RUN_LIMIT` cap constraint and the
+  `validate_collector_state` run-list check — all three are gone with the fields. Run
+  history is a query against `zap_collector_runs` on the operator's own machine, not a
+  field in a JSON a browser downloads.
+
+  Reasons, in ops' words and mine agreeing: it had zero consumers; `exported_at` was the
+  same number as the top-level `generated_at` by construction, so a consumer asserting
+  provenance could always read `generated_at` instead of depending on a second copy; and
+  the zero-upsert streak ops wanted to judge is a `GROUP BY` over the ledger, not eight
+  shipped rows. `d2faac7` was reverted before the first real export, so the tracked
+  snapshot never published the wide shape — it still carries the four nulls.
+
+  **Rule for the next person who wants run history in the artifact: if someone proposes a
+  run list again, the answer is a query, not a field.** The ledger is the record; the
+  payload is a snapshot of the numbers the dashboard draws. Anything that has to be
+  *interpreted* to be useful (a streak, a duration, a lag) belongs in the query that
+  consumes it, because publishing it freezes our current reading of it as the only one.
+
+  What survives from the widened round: the `finished_at` semantics entry above, which
+  is about the ledger and stays true — the swept row's declaration time is a property of
+  the row, not of any payload — and the gate's provenance assertion, which reads the
+  top-level `generated_at` and was never coupled to `collector.exported_at`. The gate's
+  hang discriminator is therefore unchanged. `validate_collector_state` went with the
+  fields it checked; what remains of validation is that the block is an object when
+  present, and that absence is not an error, because an older snapshot must still
+  validate. Suite at 67.

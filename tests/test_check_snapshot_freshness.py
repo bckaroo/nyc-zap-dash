@@ -172,7 +172,10 @@ class SnapshotFreshnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("records=0", result.stdout)
 
-    def test_failed_latest_run_does_not_erase_the_last_good_run(self) -> None:
+    def test_failed_latest_run_fails_even_though_the_last_good_run_is_recent(self) -> None:
+        # The run that matters is the most recent one. A failed run leaves every
+        # date in the snapshot written by the previous success, so both date
+        # assertions pass while the newest attempt to collect is dead.
         snapshot = self.write_snapshot_with_collector(
             "2026-10-28",
             "2026-10-28",
@@ -180,8 +183,32 @@ class SnapshotFreshnessTest(unittest.TestCase):
             last_status="error",
         )
         result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("collector run failed", result.stdout.lower())
         self.assertIn("status=error", result.stdout)
+
+    def test_failed_first_run_fails_instead_of_falling_back_to_staleness(self) -> None:
+        # A ledger that has recorded only failures has no good run to fall back to;
+        # it must not be mistaken for a pre-ledger snapshot.
+        snapshot = self.write_snapshot_with_collector(
+            "2026-10-28", None, last_run_at="2026-10-31T06:45:00+00:00"
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("collector run failed", result.stdout.lower())
+
+    def test_in_flight_run_is_not_treated_as_a_failure(self) -> None:
+        # A run still marked 'running' is in progress, not dead; the age of the last
+        # success is what decides.
+        snapshot = self.write_snapshot_with_collector(
+            "2026-10-31",
+            "2026-10-31",
+            last_run_at="2026-11-01T06:45:00+00:00",
+            last_status="running",
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("OK (live)", result.stdout)
 
     def test_success_after_the_reference_date_is_treated_as_live(self) -> None:
         snapshot = self.write_snapshot_with_collector("2026-11-05", "2026-11-05")

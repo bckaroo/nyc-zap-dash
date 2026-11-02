@@ -298,14 +298,14 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
             discretionary actions the map colours by; these are zoning actions, not construction
             permits issued by the Department of Buildings.
             {monthlyTrend.partialMonth && monthlyTrend.windowEnd
-              ? ` ${monthLabel(monthlyTrend.windowEnd)} is incomplete: collection stopped on ${formatDate(payload.collected_through)}.`
+              ? ` ${monthLabel(monthlyTrend.windowEnd)} is incomplete: collection stopped on ${formatDate(payload.collected_through)}, and the newest months can still grow as ZAP posts later milestones.`
               : ""}
             {monthlyTrend.undatedCount
               ? ` ${monthlyTrend.undatedCount} tracked record${monthlyTrend.undatedCount === 1 ? "" : "s"} carr${monthlyTrend.undatedCount === 1 ? "ies" : "y"} no milestone date and ${monthlyTrend.undatedCount === 1 ? "is" : "are"} excluded.`
               : ""}
           </p>
 
-          <MonthlyPipelineChart trend={monthlyTrend} collectedThrough={payload.collected_through} />
+          <MonthlyPipelineChart trend={monthlyTrend} />
         </section>
 
         <section className="panel applicant-panel" aria-labelledby="applicants-heading">

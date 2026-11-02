@@ -14,17 +14,6 @@ interface TooltipEntry {
   name?: unknown;
 }
 
-function formatShortDate(value: string): string {
-  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(date);
-}
-
 /** Compact tooltip: largest category first, count column, no default chrome. */
 function PipelineTooltip({
   active,
@@ -74,10 +63,8 @@ function PipelineTooltip({
 
 export default function MonthlyPipelineChart({
   trend,
-  collectedThrough,
 }: {
   trend: MonthlyActionTrend;
-  collectedThrough: string;
 }) {
   if (!trend.rows.some((row) => row.total > 0)) {
     return (
@@ -88,7 +75,6 @@ export default function MonthlyPipelineChart({
   }
 
   const windowText = `${monthLabel(trend.windowStart)}–${monthLabel(trend.windowEnd)}`;
-  const lastMonth = trend.rows.at(-1);
 
   return (
     <div
@@ -123,12 +109,6 @@ export default function MonthlyPipelineChart({
           ))}
         </BarChart>
       </ResponsiveContainer>
-      {lastMonth?.total === 0 && (
-        <p className="chart-note">
-          {monthLabel(trend.windowEnd)} shows no entries yet — collection through{" "}
-          {formatShortDate(collectedThrough)} is inside that month.
-        </p>
-      )}
     </div>
   );
 }

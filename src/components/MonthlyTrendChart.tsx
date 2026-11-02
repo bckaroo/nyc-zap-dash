@@ -9,9 +9,9 @@
  * `src/lib/dashboard-analytics.ts` (`buildMonthlyTrend`); this component renders
  * whatever trend object it is handed and never fetches.
  *
- * The prop types below are a structural subset of the `MonthlyTrend` /
- * `TrendDimension` contract in PLAN.md §4, so the integrator can pass the
- * analytics output straight in without casts or adapters.
+ * The props use the `MonthlyTrend` / `TrendDimension` contract types in
+ * PLAN.md §4 directly, so the integrator can pass the analytics output straight
+ * in without casts or adapters.
  *
  * NOTE on disclosure copy: this component owns the chart note (measure, stack
  * dimension, partial month, undated exclusions). The panel-level `.chart-note`

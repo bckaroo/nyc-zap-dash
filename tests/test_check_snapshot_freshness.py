@@ -197,6 +197,93 @@ class SnapshotFreshnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("collector run failed", result.stdout.lower())
 
+    # ── provenance: the snapshot must have been exported by a run that finished ──
+
+    def write_snapshot_with_provenance(
+        self,
+        *,
+        collected_through: str,
+        generated_at: str,
+        last_success_at: str,
+        last_records_upserted: int = 12,
+    ) -> Path:
+        return self.write_snapshot(
+            {
+                "collected_through": collected_through,
+                "generated_at": generated_at,
+                "collector": {
+                    "last_success_at": last_success_at,
+                    "last_run_at": last_success_at,
+                    "last_status": "ok",
+                    "last_records_upserted": last_records_upserted,
+                },
+            }
+        )
+
+    def test_hung_run_is_caught_even_though_the_age_window_is_satisfied(self) -> None:
+        # The shape ops rehearsed: Monday 06:00 starts and never finishes, so the ledger
+        # still points at the PREVIOUS Monday. Seven days against an eight-day window
+        # passes; the export that followed the hang publishes last week's numbers. Only
+        # the lag between generated_at and the last success shows it.
+        snapshot = self.write_snapshot_with_provenance(
+            collected_through="2026-10-26",
+            generated_at="2026-11-02T06:45:00+00:00",
+            last_success_at="2026-10-26T06:10:00+00:00",
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-02")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("OK (live)", result.stdout)
+        self.assertIn("not produced by that run", result.stdout)
+        self.assertIn("168.6 hour(s)", result.stdout)
+
+    def test_snapshot_exported_minutes_after_a_successful_run_passes(self) -> None:
+        snapshot = self.write_snapshot_with_provenance(
+            collected_through="2026-11-02",
+            generated_at="2026-11-02T06:52:00+00:00",
+            last_success_at="2026-11-02T06:10:00+00:00",
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-02")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("OK (provenance)", result.stdout)
+
+    def test_same_cycle_reexport_passes(self) -> None:
+        # Re-exporting the same snapshot the same afternoon is normal and must not red.
+        snapshot = self.write_snapshot_with_provenance(
+            collected_through="2026-11-02",
+            generated_at="2026-11-02T17:00:00+00:00",
+            last_success_at="2026-11-02T06:10:00+00:00",
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-02")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_export_lag_override_admits_a_deliberate_late_reexport(self) -> None:
+        snapshot = self.write_snapshot_with_provenance(
+            collected_through="2026-11-02",
+            generated_at="2026-11-03T09:00:00+00:00",
+            last_success_at="2026-11-02T06:10:00+00:00",
+        )
+        tightened = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-04")
+        self.assertEqual(tightened.returncode, 1, tightened.stdout)
+        relaxed = run_checker(
+            "--snapshot",
+            str(snapshot),
+            "--as-of",
+            "2026-11-04",
+            "--max-export-lag-hours",
+            "48",
+        )
+        self.assertEqual(relaxed.returncode, 0, relaxed.stdout)
+
+    def test_export_predating_the_last_success_is_not_a_provenance_failure(self) -> None:
+        snapshot = self.write_snapshot_with_provenance(
+            collected_through="2026-11-02",
+            generated_at="2026-11-02T05:00:00+00:00",
+            last_success_at="2026-11-02T06:10:00+00:00",
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-02")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("BEFORE the last successful run", result.stdout)
+
     def test_in_flight_run_is_not_treated_as_a_failure(self) -> None:
         # A run still marked 'running' is in progress, not dead; the age of the last
         # success is what decides.

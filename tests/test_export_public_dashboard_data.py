@@ -473,15 +473,16 @@ class CollectorStateExportTest(unittest.TestCase):
             self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:00+00:00")
             self.assertEqual(collector["last_records_upserted"], 0)
 
-    def test_swept_row_cannot_pass_for_activity(self) -> None:
+    def test_swept_row_declaration_time_cannot_pass_for_activity(self) -> None:
         # The sweep writes the *next* run's start into the swept row's finished_at, so a
-        # run that hung is declared dead a week later. The payload publishes that
-        # declaration time as last_run_at, which therefore looks freshly touched while
-        # the work behind it is a cycle old. Recency must be read off last_success_at,
+        # run that hung is declared dead a week later. ``read_collector_state`` publishes
+        # that declaration time as last_run_at, which therefore looks freshly touched
+        # while the work behind it is a cycle old. The guarantee lives on the exporter's
+        # read, not on the published artifact: recency must come off last_success_at,
         # which only ever comes from a row that recorded 'ok' -- never off last_run_at.
+        read_collector_state = runpy.run_path(str(EXPORTER))["read_collector_state"]
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db_path = tmp_path / "zap.db"
+            db_path = Path(tmp) / "zap.db"
             self._seed(
                 db_path,
                 [
@@ -496,7 +497,7 @@ class CollectorStateExportTest(unittest.TestCase):
                     ("2026-11-02T06:45:00+00:00", None, 0, "running", None),
                 ],
             )
-            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
+            collector = read_collector_state(db_path)
             # last_run_at is the newest run's start, i.e. the sweeping run -- fresh.
             self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:00+00:00")
             # The last success is two cycles back, behind the swept row. That is the
@@ -509,6 +510,11 @@ class CollectorStateExportTest(unittest.TestCase):
                 - dt.datetime.fromisoformat(collector["last_success_at"])
             ).total_seconds() / 86400.0
             self.assertGreater(gap_days, 13)
+            # And the read publishes no run history for a consumer to mis-read either.
+            self.assertEqual(
+                set(collector),
+                {"last_success_at", "last_run_at", "last_status", "last_records_upserted"},
+            )
 
 
 class CollectorBlockValidationTest(unittest.TestCase):

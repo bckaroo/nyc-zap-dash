@@ -504,3 +504,17 @@ already covers the loud case.
   Suite at 72 (both new tests fail if the sweep is ever "fixed" to invent a death time, or
   if the exporter starts deriving recency from `last_run_at`).
 
+- **Standing rule, from @spec: the published payload is a data contract, not code.** A
+  change to the *shape* of `src/data/public-dashboard-data.json` — a new field, a rename, a
+  removal, a type change, a changed cap — gets its own planning pass before implementation
+  instead of riding along with gate or collector work. Shape is ops' to call: they add, they
+  withdraw, this repo implements and records. Additions must be additive, independently
+  revertible, and valid-by-absence so an older snapshot still validates; the semantics ship
+  with the field, including the awkward path (unfinished run, swept run, missing value).
+
+  The three payload rounds in this task are the argument for the rule, not an exception to
+  it: merged, reverted, restored, inside a day, each safe on its own and all of it noise
+  that a planning pass would have spent once instead of three times. Held in
+  `notes/DEVLOG.md` because the repo's `AGENTS.md` is a protected file — the same paragraph
+  belongs there once a human approves the write.
+

@@ -200,6 +200,21 @@ Deviations accepted, recorded as follow-ups (not blockers):
   freshness disclosure honest but is weekly PR noise; a future refinement is to
   compare everything except `generated_at` and skip when only that moved.
 
+Record notes from the ops run that exercised the job end to end:
+
+- Auto-merge does not weaken the gate, it only moves it. `deploy-pages.yml` triggers
+  on `push` to `main` only, so no check runs on the snapshot PR itself; with
+  `ZAP_AUTO_MERGE=1` the merge lands unchecked and the freshness gate fires
+  immediately afterwards on the push to `main`, as a loud backstop rather than a
+  pre-merge block. The job keeps that backstop honest by never falling back to a
+  direct squash merge: if the auto-merge request is refused, it dies and leaves the
+  PR open for a human.
+- Record correction, not a history rewrite: commit `bf87557` ("DEV-52003: refresh
+  public dashboard snapshot through 2026-11-01 (#1)") cites a task id that does not
+  exist on the DevOS board (`devos show DEV-52003` → task not found; PROJ-002 stops
+  at DEV-340). The work it carries is DEV-339. Left in place because it is already
+  on `main` and rewriting a pushed commit costs more than the wrong id does.
+
 ## 2026-11-01 — Board task t_1876a925: trailing-12-month pipeline-entry card
 
 Added the market-trend card: **Applications entering the pipeline per month**, a

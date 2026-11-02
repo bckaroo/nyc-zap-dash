@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import runpy
 import sqlite3
@@ -489,6 +490,46 @@ class CollectorStateExportTest(unittest.TestCase):
             self.assertEqual(collector["recent_runs"][0]["status"], "running")
             self.assertEqual(collector["recent_runs"][0]["finished_at"], "")
             self.assertEqual(collector["recent_runs"][0]["started_at"], "2026-11-02T06:45:00+00:00")
+
+    def test_swept_row_publishes_declaration_time_and_cannot_pass_for_activity(self) -> None:
+        # The sweep writes the *next* run's start into finished_at, so a swept row's
+        # duration is how long it went unnoticed, not how long it ran. The payload must
+        # therefore show a week-long "run" without that implying any activity: recency
+        # lives in last_success_at, which still points at the previous good run.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "zap.db"
+            self._seed(
+                db_path,
+                [
+                    ("2026-10-26T06:45:00+00:00", "2026-10-26T07:02:00+00:00", 240, "ok", None),
+                    (
+                        "2026-10-26T06:45:00+00:00",
+                        "2026-11-02T06:45:00+00:00",
+                        0,
+                        "error",
+                        "run did not finish (no completion record)",
+                    ),
+                    ("2026-11-02T06:45:00+00:00", None, 0, "running", None),
+                ],
+            )
+            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
+            swept = collector["recent_runs"][1]
+            self.assertEqual(swept["status"], "error")
+            self.assertEqual(swept["finished_at"], "2026-11-02T06:45:00+00:00")
+            self.assertEqual(swept["finished_at"], collector["last_run_at"])
+            # Seven days of apparent duration that mean nothing, published as-is.
+            self.assertEqual(
+                (
+                    dt.datetime.fromisoformat(swept["finished_at"])
+                    - dt.datetime.fromisoformat(swept["started_at"])
+                ).total_seconds(),
+                7 * 24 * 3600,
+            )
+            # last_run_at is the newest run's start; the last *success* is a cycle back.
+            self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:00+00:00")
+            self.assertEqual(collector["last_success_at"], "2026-10-26T07:02:00+00:00")
+            self.assertEqual(collector["last_status"], "running")
 
     def test_zero_upsert_streak_is_readable_from_the_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

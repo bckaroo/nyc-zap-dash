@@ -1,0 +1,50 @@
+name: PR snapshot freshness
+
+# Pre-merge twin of the staleness gate in deploy-pages.yml.
+#
+# deploy-pages.yml only runs on push-to-main, so with auto-merge enabled the
+# freshness check fires AFTER the merge -- too late to block anything. This
+# workflow runs the same gate on the pull request itself, which gives
+# auto-merge (and branch protection) a real check to wait on.
+#
+# The job is named `snapshot-freshness` on purpose: that is the check name
+# GitHub reports, and branch protection must require exactly this string.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot-freshness:
+    name: snapshot-freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check the PR's own snapshot, not the merge of head into base.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fail if the PR's tracked snapshot is stale
+        # Same contract as deploy-pages.yml: compare collected_through against
+        # the COMMIT date, never the runtime clock, so re-running an old PR
+        # still measures that commit's freshness instead of today's.
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          head_sha=$(git rev-parse HEAD)
+          if [ "$head_sha" != "$PR_HEAD_SHA" ]; then
+            echo "ERROR: checked out ${head_sha}, expected PR head ${PR_HEAD_SHA}."
+            echo "The freshness gate must measure the PR's own commit."
+            exit 1
+          fi
+          commit_ts=$(git log -1 --format=%cI HEAD)
+          echo "PR head commit: ${head_sha} at ${commit_ts}"
+          python3 scripts/check-snapshot-freshness.py --as-of "$commit_ts" --max-days 10

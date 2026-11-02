@@ -240,3 +240,26 @@ single-line legend, and no clipping.
 Operational follow-up: the systemd service was **not** restarted from this
 unattended run — run `systemctl --user restart zapdash.service` to serve the new
 build on 127.0.0.1:9003 and the tailnet route.
+
+## 2026-11-02 — t_1876a925 verification and publication
+
+Second pass on the same card, after the first run exhausted its iteration budget
+with the code committed but the refreshed snapshot still unstaged.
+
+- Re-ran the full gate on the committed tree: 25 Vitest (19 analytics, 6 map) and
+  30 Python tests PASS, `npm run lint` clean, `npm run build` PASS. The build
+  re-exported the feed (242 records, 224 with `pipeline_start_date`, earliest
+  2023-06, `collected_through` 2026-11-02) and rewrote the tracked snapshot, which
+  is the 470-insertion change now committed.
+- Live render verified against a throwaway `next start -p 9317` instance, because
+  an unattended run cannot `systemctl --user restart` (blocked by the approval
+  guard) and must not disturb the port-9003 service. The rendered panel reads
+  Dec '25–Nov '26 · 112 applications entered the review pipeline, prior 12 months
+  101, change +11%, with both disclosures (Nov '26 incomplete; 18 records carry no
+  milestone date and are excluded).
+- Snapshot + this entry committed and pushed; the Pages workflow deploys from
+  `main`, so the public copy picks the card up on the same push.
+
+Still open for the operator: `systemctl --user restart zapdash.service` to put the
+new build on 127.0.0.1:9003 and the tailnet route (the served bundle predates the
+card until then).

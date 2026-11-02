@@ -263,3 +263,14 @@ with the code committed but the refreshed snapshot still unstaged.
 Still open for the operator: `systemctl --user restart zapdash.service` to put the
 new build on 127.0.0.1:9003 and the tailnet route (the served bundle predates the
 card until then).
+
+### Follow-up polish (same day)
+
+Visual QA of the deployed Pages copy at 1280px showed the card rendering correctly
+(12 stacked bars, one-line labelled legend, no clipping) with one readability wart:
+the panel note said Nov '26 was incomplete *and* the chart repeated "shows no
+entries yet" underneath. The redundant chart note is gone, and the panel note now
+also states the right-censoring caveat — the newest months can still grow as ZAP
+publishes later milestones — so a reader does not mistake the last two bars for a
+collapse in filings. Pages deploy 41372336040 succeeded and the live copy was
+re-read and screenshotted after the change.

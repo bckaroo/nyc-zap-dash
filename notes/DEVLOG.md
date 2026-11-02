@@ -202,13 +202,19 @@ Deviations accepted, recorded as follow-ups (not blockers):
 
 Record notes from the ops run that exercised the job end to end:
 
-- Auto-merge does not weaken the gate, it only moves it. `deploy-pages.yml` triggers
-  on `push` to `main` only, so no check runs on the snapshot PR itself; with
-  `ZAP_AUTO_MERGE=1` the merge lands unchecked and the freshness gate fires
-  immediately afterwards on the push to `main`, as a loud backstop rather than a
-  pre-merge block. The job keeps that backstop honest by never falling back to a
-  direct squash merge: if the auto-merge request is refused, it dies and leaves the
-  PR open for a human.
+- Auto-merge does not weaken the gate, it only moves it — and since 2026-11-02 the
+  gate sits *before* the merge. `pr-check.yml` runs `snapshot-freshness` on
+  `pull_request`, `main` requires that context, and auto-merge therefore waits on it:
+  the snapshot PR cannot land with stale data. `deploy-pages.yml` still triggers on
+  `push` to `main` only, and keeps firing the freshness check afterwards as a second,
+  post-merge backstop. The job never falls back to a direct squash merge: if the
+  auto-merge request is refused, it dies and leaves the PR open for a human.
+- Two ordering facts that cost a run each, recorded so they are not rediscovered:
+  the required status check can only be required after it has reported on a real PR
+  (requiring a never-run context blocks every merge, including the snapshot job's);
+  and `gh pr merge --auto` *queues* the merge, so the PR is still `OPEN` immediately
+  afterwards — reading `mergeCommit` right away returns null and is a bug, not a
+  refusal. Poll for `state == MERGED` before verifying the Pages run.
 - Record correction, not a history rewrite: commit `bf87557` ("DEV-52003: refresh
   public dashboard snapshot through 2026-11-01 (#1)") cites a task id that does not
   exist on the DevOS board (`devos show DEV-52003` → task not found; PROJ-002 stops

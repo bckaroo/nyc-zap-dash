@@ -414,3 +414,20 @@ Backfilling historical runs was rejected: inventing rows for cycles nobody
 recorded would make the ledger lie, which is the failure this card exists to
 prevent. Alerting on a failed run stays out of scope; the cron exit code
 already covers the loud case.
+
+- Follow-up `62a7cc9` (PR #9): the gate now also asserts *provenance* — that
+  the snapshot was exported by a run which had already finished. Ops rehearsed
+  the hole: a collector that starts and never finishes leaves its row open and
+  `last_success_at` pointing at the previous cycle, so Monday 06:45 prints
+  "OK (live) ... 7 day(s) before as_of (max 8)" and deploys last cycle's
+  numbers, only reddening the following Monday at 14 days. The discriminator is
+  the lag between the snapshot's own `generated_at` and `collector.last_success_at`
+  (`--max-export-lag-hours`, default 24): minutes when the exporter runs behind a
+  working collector, a full cycle when it runs against a DB no recent run wrote.
+  Measured against `generated_at` rather than `--as-of` so the verdict belongs to
+  the snapshot and an old commit keeps the verdict it was built with. An export
+  that *predates* the last success is not a failure, and a snapshot without
+  `generated_at` skips the assertion rather than inventing one. Suite at 60.
+  Red test on PR #9 (`de0bd6e`, reverted `a7aaa70`): the tracked snapshot mutated into the hang shape
+  — every date fresh, `status=running`, `last_success_at` a cycle back — failed
+  in 4s on provenance alone while staleness and liveness both printed OK.

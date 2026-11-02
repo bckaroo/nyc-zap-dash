@@ -311,6 +311,52 @@ def read_records(db_path: Path) -> list[dict[str, Any]]:
     )
 
 
+def read_collector_state(db_path: Path) -> dict[str, Any]:
+    """Read run-ledger facts for the public payload.
+
+    Only ``status='ok'`` runs count as a successful refresh: a row left in 'running'
+    is a crashed run, and an 'error' row is a failed one. A database predating the
+    ledger (or a missing file) yields nulls rather than an exception, so the exporter
+    keeps working and the freshness gate falls back to ``collected_through``.
+    """
+    state: dict[str, Any] = {
+        "last_success_at": None,
+        "last_run_at": None,
+        "last_status": None,
+        "last_records_upserted": None,
+    }
+    if not db_path.is_file():
+        return state
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if "zap_collector_runs" not in tables:
+                return state
+            latest = connection.execute(
+                "SELECT started_at, finished_at, records_upserted, status"
+                " FROM zap_collector_runs ORDER BY run_id DESC LIMIT 1"
+            ).fetchone()
+            if latest is not None:
+                state["last_run_at"] = clean(latest[1] or latest[0])
+                state["last_status"] = clean(latest[3])
+                state["last_records_upserted"] = latest[2]
+            success = connection.execute(
+                "SELECT finished_at FROM zap_collector_runs"
+                " WHERE status='ok' AND finished_at IS NOT NULL"
+                " ORDER BY run_id DESC LIMIT 1"
+            ).fetchone()
+            if success is not None:
+                state["last_success_at"] = clean(success[0])
+    except sqlite3.Error:
+        return state
+    return state
+
+
 def build_payload(db_path: Path, generated_at: str) -> dict[str, Any]:
     records = read_records(db_path)
     collected_through = max(
@@ -321,6 +367,7 @@ def build_payload(db_path: Path, generated_at: str) -> dict[str, Any]:
     return {
         "generated_at": generated_at,
         "collected_through": collected_through,
+        "collector": read_collector_state(db_path),
         "source": SOURCE,
         "record_count": len(records),
         "boundaries": BOUNDARY_SOURCES,
@@ -345,6 +392,9 @@ def validate_payload(payload: Any) -> dict[str, Any]:
         raise ValueError("Invalid dashboard payload: record_count mismatch")
     if not payload.get("generated_at") or not payload.get("collected_through"):
         raise ValueError("Invalid dashboard payload: metadata missing")
+    collector = payload.get("collector")
+    if collector is not None and not isinstance(collector, dict):
+        raise ValueError("Invalid dashboard payload: collector metadata malformed")
     map_payload = payload.get("map")
     if not isinstance(map_payload, dict):
         raise ValueError("Invalid dashboard payload: map payload missing")

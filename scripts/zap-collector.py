@@ -272,7 +272,50 @@ def init_db(conn):
         if col in existing:
             continue
         conn.execute(f"ALTER TABLE zap_applications ADD COLUMN {col} {coltype}")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS zap_collector_runs (
+            run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            records_upserted INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'running',
+            error TEXT
+        )
+    """)
     conn.commit()
+
+
+def start_run(conn, started_at):
+    """Open a run row, first reclassifying any run a crash left unfinished.
+
+    A row still marked 'running' when a new run starts cannot be a live run: the
+    weekly cron is single-instance and finished rows are closed before exit. Marking
+    it 'error' keeps the ledger honest without wrapping the whole collector body in
+    exception handling.
+    """
+    conn.execute(
+        "UPDATE zap_collector_runs SET status='error', finished_at=COALESCE(finished_at, ?),"
+        " error=COALESCE(error, 'run did not finish (no completion record)')"
+        " WHERE status='running'",
+        (started_at,),
+    )
+    cursor = conn.execute(
+        "INSERT INTO zap_collector_runs (started_at, status, records_upserted)"
+        " VALUES (?, 'running', 0)",
+        (started_at,),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def finish_run(conn, run_id, finished_at, records_upserted, status, error=None):
+    conn.execute(
+        "UPDATE zap_collector_runs SET finished_at=?, records_upserted=?, status=?, error=?"
+        " WHERE run_id=?",
+        (finished_at, records_upserted, status, error, run_id),
+    )
+    conn.commit()
+
 
 
 def upsert(conn, row, today):
@@ -442,10 +485,13 @@ def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose,
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     init_db(conn)
+    run_id = start_run(conn, now.isoformat())
 
     # ── API reachability check (fail loud if down) ──
     probe = fetch_project("2026M0366", verbose=False)
     if probe is None or probe == "ERR":
+        finish_run(conn, run_id, datetime.now(timezone.utc).isoformat(), 0, "error",
+                   "ZAP API unreachable (probe 2026M0366 failed)")
         conn.close()
         print("ERROR: ZAP API unreachable (probe 2026M0366 failed). "
               "Aborting to avoid an empty newsletter.", file=sys.stderr)
@@ -460,6 +506,7 @@ def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose,
     completed = 0
     errors = 0
     api_failures = 0
+    upserted = 0
 
     # Unique, deterministic candidate order; a set-based dedupe with no side effects.
     todo = sorted(set(candidate_ids))
@@ -473,7 +520,7 @@ def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose,
 
     def _absorb(pid, result):
         """Main-thread consumer: all SQLite writes stay here (sqlite3 is not shared)."""
-        nonlocal fetched, completed, errors, api_failures
+        nonlocal fetched, completed, errors, api_failures, upserted
         fetched += 1
         if result is None:
             return  # 404 scan miss
@@ -488,9 +535,11 @@ def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose,
             # Still record it so we stop re-fetching forever
             row = extract_project_data(pid, result)
             upsert(conn, row, today)
+            upserted += 1
             return
         row = extract_project_data(pid, result)
         upsert(conn, row, today)
+        upserted += 1
         active.append(row)
         log(f"  OK {pid} | {row['project_name'][:45]} | {status}", verbose)
         if verbose and fetched % 50 == 0:
@@ -511,6 +560,7 @@ def run(db_path, output_path, scan_years, scan_range, lookback_days, verbose,
             _absorb(pid, result)
 
     conn.commit()
+    finish_run(conn, run_id, datetime.now(timezone.utc).isoformat(), upserted, "ok")
 
     # ── Select THIS WEEK's pool (from live data, not fragile date math) ──
     # A project is "this week" if it was first seen this week OR its milestone

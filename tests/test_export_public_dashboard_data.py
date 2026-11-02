@@ -146,7 +146,7 @@ class PublicDashboardExportTest(unittest.TestCase):
             self.assertEqual(payload["record_count"], 1)
             self.assertEqual(
                 set(payload),
-                {"generated_at", "collected_through", "source", "record_count", "boundaries", "map", "records"},
+                {"generated_at", "collected_through", "source", "record_count", "boundaries", "map", "records", "collector"},
             )
             self.assertEqual(payload["source"]["name"], "NYC Department of City Planning Zoning Application Portal")
             self.assertEqual(payload["source"]["url"], "https://zap.planning.nyc.gov/projects")
@@ -319,6 +319,115 @@ class PublicDashboardExportTest(unittest.TestCase):
             output_payload = json.loads(output_path.read_text())
             self.assertEqual(snapshot_payload, output_payload)
             self.assertEqual(snapshot_payload["generated_at"], "2026-10-02T12:00:00+00:00")
+
+
+RUNS_TABLE = """
+    CREATE TABLE zap_collector_runs (
+        run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        records_upserted INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'running',
+        error TEXT
+    )
+"""
+
+
+class CollectorStateExportTest(unittest.TestCase):
+    """The export must carry the run ledger so the gate can tell a dead collector
+    from a quiet week."""
+
+    def _seed(self, db_path: Path, runs: list[tuple]) -> None:
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(SEED_TABLE)
+            connection.execute(SEED_ROW)
+            connection.execute(RUNS_TABLE)
+            for run in runs:
+                connection.execute(
+                    "INSERT INTO zap_collector_runs"
+                    " (started_at, finished_at, records_upserted, status, error)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    run,
+                )
+
+    def _export(self, db_path: Path, output_path: Path) -> dict:
+        subprocess.run(
+            [
+                "python3",
+                str(EXPORTER),
+                "--db",
+                str(db_path),
+                "--output",
+                str(output_path),
+                "--generated-at",
+                "2026-11-02T12:00:00+00:00",
+            ],
+            check=True,
+            cwd=REPO_ROOT,
+        )
+        return json.loads(output_path.read_text())
+
+    def test_exports_last_successful_run_and_latest_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "zap.db"
+            self._seed(
+                db_path,
+                [
+                    ("2026-10-26T06:45:00+00:00", "2026-10-26T07:02:00+00:00", 240, "ok", None),
+                    ("2026-11-02T06:45:00+00:00", "2026-11-02T06:45:30+00:00", 0, "error",
+                     "ZAP API unreachable (probe 2026M0366 failed)"),
+                ],
+            )
+            payload = self._export(db_path, tmp_path / "dashboard.json")
+            collector = payload["collector"]
+            self.assertEqual(collector["last_success_at"], "2026-10-26T07:02:00+00:00")
+            self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:30+00:00")
+            self.assertEqual(collector["last_status"], "error")
+            self.assertEqual(collector["last_records_upserted"], 0)
+
+    def test_empty_successful_run_is_exported_as_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "zap.db"
+            self._seed(
+                db_path,
+                [("2026-11-02T06:45:00+00:00", "2026-11-02T07:01:00+00:00", 0, "ok", None)],
+            )
+            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
+            self.assertEqual(collector["last_success_at"], "2026-11-02T07:01:00+00:00")
+            self.assertEqual(collector["last_records_upserted"], 0)
+
+    def test_crashed_run_is_not_a_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "zap.db"
+            self._seed(
+                db_path,
+                [("2026-11-02T06:45:00+00:00", None, 0, "running", None)],
+            )
+            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
+            self.assertIsNone(collector["last_success_at"])
+            self.assertEqual(collector["last_status"], "running")
+            self.assertEqual(collector["last_run_at"], "2026-11-02T06:45:00+00:00")
+
+    def test_database_without_the_ledger_exports_nulls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "zap.db"
+            with sqlite3.connect(db_path) as connection:
+                connection.execute(SEED_TABLE)
+                connection.execute(SEED_ROW)
+            collector = self._export(db_path, tmp_path / "dashboard.json")["collector"]
+            self.assertEqual(
+                collector,
+                {
+                    "last_success_at": None,
+                    "last_run_at": None,
+                    "last_status": None,
+                    "last_records_upserted": None,
+                },
+            )
 
 
 if __name__ == "__main__":

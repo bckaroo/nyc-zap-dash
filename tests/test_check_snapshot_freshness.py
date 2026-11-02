@@ -121,5 +121,127 @@ class SnapshotFreshnessTest(unittest.TestCase):
         self.assertIn(f"collected_through={collected_through}", result.stdout)
 
 
+    # ── liveness: the collector run ledger ──
+
+    def write_snapshot_with_collector(
+        self, collected_through: str, last_success_at, **collector: object
+    ) -> Path:
+        state = {
+            "last_success_at": last_success_at,
+            "last_run_at": last_success_at,
+            "last_status": "ok" if last_success_at else "error",
+            "last_records_upserted": 12,
+        }
+        state.update(collector)
+        return self.write_snapshot(
+            {"collected_through": collected_through, "collector": state}
+        )
+
+    def test_dead_collector_fails_even_though_the_data_looks_fresh(self) -> None:
+        # THE hole DEV-343 closes: collected_through is only 4 days old, so the
+        # staleness window is satisfied, but no successful run in 9 days means the
+        # collector is dead and the next deploy ships numbers nobody refreshed.
+        snapshot = self.write_snapshot_with_collector("2026-10-28", "2026-10-23")
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("collector run", result.stdout.lower())
+
+    def test_recent_successful_run_passes(self) -> None:
+        snapshot = self.write_snapshot_with_collector("2026-10-30", "2026-10-30")
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("live", result.stdout.lower())
+
+    def test_exactly_max_collector_age_passes(self) -> None:
+        snapshot = self.write_snapshot_with_collector("2026-10-24", "2026-10-24")
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_one_day_over_max_collector_age_fails(self) -> None:
+        snapshot = self.write_snapshot_with_collector("2026-10-23", "2026-10-23")
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_empty_but_successful_run_counts_as_live(self) -> None:
+        # A run that upserted nothing is still a run: the collector is alive and the
+        # absence of new filings is a real answer, not a failure.
+        snapshot = self.write_snapshot_with_collector(
+            "2026-10-31", "2026-10-31", last_records_upserted=0
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("records=0", result.stdout)
+
+    def test_failed_latest_run_does_not_erase_the_last_good_run(self) -> None:
+        snapshot = self.write_snapshot_with_collector(
+            "2026-10-28",
+            "2026-10-28",
+            last_run_at="2026-10-31T06:45:00+00:00",
+            last_status="error",
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("status=error", result.stdout)
+
+    def test_success_after_the_reference_date_is_treated_as_live(self) -> None:
+        snapshot = self.write_snapshot_with_collector("2026-11-05", "2026-11-05")
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_max_collector_age_override_rejects_recent_run(self) -> None:
+        snapshot = self.write_snapshot_with_collector("2026-10-30", "2026-10-30")
+        result = run_checker(
+            "--snapshot",
+            str(snapshot),
+            "--as-of",
+            "2026-11-01",
+            "--max-collector-age-days",
+            "1",
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_max_collector_age_override_allows_old_run(self) -> None:
+        snapshot = self.write_snapshot_with_collector("2026-11-01", "2026-09-01")
+        result = run_checker(
+            "--snapshot",
+            str(snapshot),
+            "--as-of",
+            "2026-11-01",
+            "--max-collector-age-days",
+            "90",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_pre_ledger_snapshot_falls_back_to_the_staleness_window(self) -> None:
+        # No collector block at all: behave exactly as before DEV-343 so landing the
+        # check never reddens a snapshot that used to pass.
+        snapshot = self.write_snapshot({"collected_through": "2026-10-22"})
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("pre-ledger", result.stdout)
+
+    def test_null_last_success_at_falls_back_to_the_staleness_window(self) -> None:
+        snapshot = self.write_snapshot_with_collector(
+            "2026-10-31", None, last_status="running", last_run_at=None
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("pre-ledger", result.stdout)
+
+    def test_malformed_last_success_at_fails(self) -> None:
+        snapshot = self.write_snapshot_with_collector("2026-10-31", "last Monday")
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("last_success_at", result.stdout + result.stderr)
+
+    def test_malformed_collector_block_falls_back_instead_of_crashing(self) -> None:
+        snapshot = self.write_snapshot(
+            {"collected_through": "2026-10-31", "collector": "nope"}
+        )
+        result = run_checker("--snapshot", str(snapshot), "--as-of", "2026-11-01")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("pre-ledger", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

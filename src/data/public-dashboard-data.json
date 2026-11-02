@@ -1,6 +1,12 @@
 {
   "generated_at": "2026-11-02T11:53:35.204084+00:00",
   "collected_through": "2026-11-02",
+  "collector": {
+    "last_success_at": null,
+    "last_run_at": null,
+    "last_status": null,
+    "last_records_upserted": null
+  },
   "source": {
     "name": "NYC Department of City Planning Zoning Application Portal",
     "url": "https://zap.planning.nyc.gov/projects",

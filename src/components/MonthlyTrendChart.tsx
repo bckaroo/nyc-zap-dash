@@ -192,35 +192,40 @@ function TrendToggle({
  */
 function TrendDataTable({ trend, dimension }: { trend: TrendData; dimension: TrendDimension }) {
   const windowText = `${monthLabel(trend.windowStart)}–${monthLabel(trend.windowEnd)}`;
+  // The clipping wrapper carries `.visually-hidden`: a `<table>` ignores a 1px
+  // width (table layout grows to fit its columns), so the table itself must sit
+  // inside a clipped block or it makes the whole page scroll sideways on phones.
   return (
-    <table className="visually-hidden">
-      <caption>
-        Applications entering the ZAP review pipeline per month, {windowText}, stacked by{" "}
-        {DIMENSION_ARIA[dimension]}
-      </caption>
-      <thead>
-        <tr>
-          <th scope="col">Month</th>
-          {trend.categories.map((category) => (
-            <th key={category.code} scope="col">
-              {category.label}
-            </th>
-          ))}
-          <th scope="col">Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        {trend.rows.map((row) => (
-          <tr key={row.month}>
-            <th scope="row">{row.label}</th>
+    <div className="visually-hidden">
+      <table>
+        <caption>
+          Applications entering the ZAP review pipeline per month, {windowText}, stacked by{" "}
+          {DIMENSION_ARIA[dimension]}
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Month</th>
             {trend.categories.map((category) => (
-              <td key={category.code}>{Number(row[category.code] ?? 0)}</td>
+              <th key={category.code} scope="col">
+                {category.label}
+              </th>
             ))}
-            <td>{row.total}</td>
+            <th scope="col">Total</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {trend.rows.map((row) => (
+            <tr key={row.month}>
+              <th scope="row">{row.label}</th>
+              {trend.categories.map((category) => (
+                <td key={category.code}>{Number(row[category.code] ?? 0)}</td>
+              ))}
+              <td>{row.total}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

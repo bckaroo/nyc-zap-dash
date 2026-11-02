@@ -6,16 +6,17 @@ import {
   APPLICANT_CAVEAT,
   COVERAGE_DISCLOSURE,
   SOURCE_ATTRIBUTION,
-  buildMonthlyActionTrend,
+  buildMonthlyTrend,
   buildOverview,
   computeApplicantLeaderboard,
   filterApplications,
   monthLabel,
   selectWeeklyHighlights,
   type DashboardPayload,
+  type TrendDimension,
 } from "../lib/dashboard-analytics";
 import GeographyMap from "./GeographyMap";
-import MonthlyPipelineChart from "./MonthlyPipelineChart";
+import MonthlyTrendChart from "./MonthlyTrendChart";
 
 function formatDate(value: string): string {
   if (!value) return "Not reported";
@@ -65,6 +66,7 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
   const [communityDistrict, setCommunityDistrict] = useState("");
   const [status, setStatus] = useState("");
   const [expandedApplicant, setExpandedApplicant] = useState<string | null>(null);
+  const [trendDimension, setTrendDimension] = useState<TrendDimension>("action");
 
   const overview = useMemo(() => buildOverview(payload.records), [payload.records]);
   const boroughs = useMemo(
@@ -103,8 +105,8 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
     [payload.collected_through, payload.records],
   );
   const monthlyTrend = useMemo(
-    () => buildMonthlyActionTrend(payload.records, payload.collected_through),
-    [payload.collected_through, payload.records],
+    () => buildMonthlyTrend(payload.records, payload.collected_through, trendDimension),
+    [payload.collected_through, payload.records, trendDimension],
   );
   const staleness = stalenessLabel(payload.collected_through, payload.generated_at);
 
@@ -292,20 +294,11 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
             </div>
           )}
 
-          <p className="chart-note">
-            Each application counts once, in the month ZAP records its first milestone — the point it
-            entered review. Stacks are the application&apos;s primary ZAP action type, the same
-            discretionary actions the map colours by; these are zoning actions, not construction
-            permits issued by the Department of Buildings.
-            {monthlyTrend.partialMonth && monthlyTrend.windowEnd
-              ? ` ${monthLabel(monthlyTrend.windowEnd)} is incomplete: collection stopped on ${formatDate(payload.collected_through)}, and the newest months can still grow as ZAP posts later milestones.`
-              : ""}
-            {monthlyTrend.undatedCount
-              ? ` ${monthlyTrend.undatedCount} tracked record${monthlyTrend.undatedCount === 1 ? "" : "s"} carr${monthlyTrend.undatedCount === 1 ? "ies" : "y"} no milestone date and ${monthlyTrend.undatedCount === 1 ? "is" : "are"} excluded.`
-              : ""}
-          </p>
-
-          <MonthlyPipelineChart trend={monthlyTrend} />
+          <MonthlyTrendChart
+            trend={monthlyTrend}
+            dimension={trendDimension}
+            onDimensionChange={setTrendDimension}
+          />
         </section>
 
         <section className="panel applicant-panel" aria-labelledby="applicants-heading">

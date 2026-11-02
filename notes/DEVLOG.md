@@ -289,3 +289,57 @@ also states the right-censoring caveat — the newest months can still grow as Z
 publishes later milestones — so a reader does not mistake the last two bars for a
 collapse in filings. Pages deploy 41372336040 succeeded and the live copy was
 re-read and screenshotted after the change.
+
+## 2026-11-02 — t_f4d30975 integration: dimension toggle on the per-month card
+
+Wired the dimension-aware trend card into the shipped dashboard and removed the
+last mock/duplicate surface around it.
+
+- `DashboardExplorer` now owns `trendDimension` state, computes
+  `buildMonthlyTrend(records, collected_through, dimension)` in a memo, and passes
+  it to `MonthlyTrendChart`. The panel-level `.chart-note` is gone: the component
+  owns that copy (measure, dimension wording, partial month, undated exclusions),
+  so the disclosure renders once.
+- `MonthlyPipelineChart.tsx` deleted — `MonthlyTrendChart` supersedes it
+  (identical action-mode visuals plus the toggle, states and a11y table), and two
+  charts reaching for the same data is how they drift.
+- Fixed a real responsive bug found during verification: `.visually-hidden` on a
+  `<table>` does not clip, because table layout grows past the 1px width. The
+  screen-reader table now sits inside a clipped `<div class="visually-hidden">`.
+  Before the fix the page scrolled sideways to 1124px at 360px viewport width.
+- `tests/dashboard-trend-integration.test.tsx` (9 tests) asserts the wiring
+  against `buildMonthlyTrend` output for a seeded payload: 12-month window,
+  per-row stack sums, zero month rendered as zeroes, legend/table categories
+  matching the API, toggle radios, chart aria-label, single chart note, and the
+  empty-snapshot path.
+- Browser verification on the production build (`next start`, seeded payload,
+  served through a throwaway tunnel): bar pixel heights 69px/application with
+  per-month totals 3,3,2,2,1,2,2,2,3,2 = 22 (Jan and Apr render no bar at 0),
+  legend 8 action codes + "Other actions (1)" roll-up, tooltip read from the DOM
+  as "Aug '26 · 2 applications / 2 Renewal", toggle click flips the aria-label to
+  "inferred applicant type" and the legend to the six applicant buckets with the
+  same 22 total, and no console errors on load. At 360px the card itself has no
+  horizontal overflow (toggle stacks, legend wraps); the map panel still does
+  (pre-existing, unrelated to this card).
+- Gate: 103 Vitest, 30 Python unittest, eslint, tsc and `next build` all green.
+
+Re-verified the integration on the production build (`next start`) against the
+real tracked snapshot (242 records, collected through 2026-11-02) after the card
+landed, so the numbers below come from the shipped data rather than a fixture:
+
+- Independent recount of `src/data/public-dashboard-data.json` gives Dec '25–Nov
+  '26 = 25, 9, 11, 14, 14, 11, 8, 5, 8, 5, 2, 0 (window total 112, prior 101, 18
+  undated). The rendered stack heights divide by the y-axis scale (9.86 px per
+  application) to exactly those counts, and Nov '26 — the incomplete month with
+  no entries — contributes no bar segments at all.
+- Tooltip on Mar '26 read from the live DOM: "14 applications" with 4 + 4 + 2 +
+  2 + 2 per action type, and the legend lists the 8 kept codes plus
+  "Other actions (8)".
+- Switching to Applicant type keeps the same 112 and the same per-month
+  distribution, recolours to developer / city agency / nonprofit (the only three
+  buckets present in this snapshot, per the D2 risk), and rewrites the aria-label
+  to "stacked by inferred applicant type".
+- No console errors, no pageerror and no unhandled rejection on a fresh load. At
+  360px the card has zero overflowing descendants (panel width 321px); the only
+  horizontal overflow on the page is the map panel's error text, which predates
+  this change.

@@ -457,23 +457,26 @@ already covers the loud case.
   `TypeError`, and the tracked snapshot is deliberately not regenerated here — it gains
   the new shape on the next real collector run. Suite at 70.
 
-- **Superseded within the hour — `393b7f0` (PR #13) reverts `ea069bc`.** Ops asked for
-  `exported_at` and `recent_runs` in the payload and then withdrew both: their cron runs
-  locally against `data/zap-applications.db`, so a zero-upsert streak is a `SELECT`
-  against `zap_collector_runs`, and they will not ship two months of run history into a
-  JSON file served to a browser to save a local query. Their words: "generated_at plus
-  the four summary fields is the right size". That is a scope call, and it is theirs —
-  the payload is a published artifact and every field in it is a permanent commitment.
+- **The round trip, and what it cost: merged `ea069bc`, reverted `a837c4a`, restored here.**
+  Ops sent "do not add a runs list" while the merge was already in flight and I reverted it
+  before that message's reply could land; they then decided the opposite — keep it, because
+  removing eight rows costs another PR and a round of review and the design is sound. Both
+  messages were honest and neither was a disagreement; it was two people acting on
+  different snapshots of the same conversation. The cost of guessing wrong in the
+  reversible direction was one `git revert` each way, which is the argument for keeping
+  published-surface additions append-only and independently revertible rather than
+  bundled with the thing they serve.
 
-  Nothing is lost by the revert. `exported_at` was defined as the exporter's own clock
-  and was equal to the payload's top-level `generated_at` by construction, so it was a
-  duplicate field that could only ever drift, not an independent signal; the gate's
-  provenance assertion reads `generated_at` and is untouched. The run history the field
-  would have carried still exists — it is `zap_collector_runs`, which is where a streak
-  belongs.
+  The decision now carries a constraint, recorded here and in a comment beside
+  `RECENT_RUN_LIMIT` so it cannot be re-litigated by whoever touches that file next: **the
+  cap stays at 8 and never becomes "all runs"; any widening of the shape — a new field, a
+  larger cap, a different row shape — goes back to ops before it lands.** A payload served
+  to a browser is a permanent commitment to every consumer of it, and ops owns that
+  surface, not the collector lane.
 
-  The lesson worth keeping: the payload stayed correct at every step because the
-  additions were additive and validated, but reversibility is what made a
-  twenty-minute-old requirement change cost one `git revert` instead of a migration.
-  Suite back to 60.
+  Ops also corrected their own framing, unprompted, and the correction is worth keeping:
+  `exported_at` is the same number as `generated_at` by construction, with a test pinning
+  the equality — so they will assert from the artifact side anyway, on the principle that
+  they should not be depending on our defaults being right. Two fields carrying one number
+  is duplication; a consumer that verifies rather than assumes is not. Suite at 70.
 

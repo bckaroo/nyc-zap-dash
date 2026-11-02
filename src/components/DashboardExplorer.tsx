@@ -6,13 +6,16 @@ import {
   APPLICANT_CAVEAT,
   COVERAGE_DISCLOSURE,
   SOURCE_ATTRIBUTION,
+  buildMonthlyActionTrend,
   buildOverview,
   computeApplicantLeaderboard,
   filterApplications,
+  monthLabel,
   selectWeeklyHighlights,
   type DashboardPayload,
 } from "../lib/dashboard-analytics";
 import GeographyMap from "./GeographyMap";
+import MonthlyPipelineChart from "./MonthlyPipelineChart";
 
 function formatDate(value: string): string {
   if (!value) return "Not reported";
@@ -97,6 +100,10 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
   );
   const weeklyHighlights = useMemo(
     () => selectWeeklyHighlights(payload.records, payload.collected_through),
+    [payload.collected_through, payload.records],
+  );
+  const monthlyTrend = useMemo(
+    () => buildMonthlyActionTrend(payload.records, payload.collected_through),
     [payload.collected_through, payload.records],
   );
   const staleness = stalenessLabel(payload.collected_through, payload.generated_at);
@@ -246,6 +253,59 @@ export default function DashboardExplorer({ payload }: { payload: DashboardPaylo
             communityDistrict={communityDistrict}
             collectedThrough={payload.collected_through}
           />
+        </section>
+
+        <section className="panel pipeline-panel" aria-labelledby="pipeline-heading">
+          <div className="section-heading compact">
+            <div>
+              <p className="eyebrow ink">Trailing 12 months · market trend</p>
+              <h2 id="pipeline-heading">Applications entering the pipeline per month</h2>
+            </div>
+            <p>
+              {monthlyTrend.rows.length
+                ? `${monthLabel(monthlyTrend.windowStart)}–${monthLabel(monthlyTrend.windowEnd)} · ${monthlyTrend.windowTotal.toLocaleString()} applications entered the review pipeline`
+                : "No collection date is available for this snapshot"}
+            </p>
+          </div>
+
+          {monthlyTrend.rows.length > 0 && (
+            <div className="pipeline-metrics">
+              <div>
+                <span>Trailing 12 months</span>
+                <strong>{monthlyTrend.windowTotal.toLocaleString()}</strong>
+                <small>Applications with a reported pipeline-entry date</small>
+              </div>
+              <div>
+                <span>Prior 12 months</span>
+                <strong>{monthlyTrend.priorWindowTotal.toLocaleString()}</strong>
+                <small>The same measure for the year before this window</small>
+              </div>
+              <div>
+                <span>Change</span>
+                <strong className={monthlyTrend.changePct !== null && monthlyTrend.changePct < 0 ? "delta down" : "delta up"}>
+                  {monthlyTrend.changePct === null
+                    ? "n/a"
+                    : `${monthlyTrend.changePct > 0 ? "+" : ""}${monthlyTrend.changePct}%`}
+                </strong>
+                <small>Year over year, pipeline entries</small>
+              </div>
+            </div>
+          )}
+
+          <p className="chart-note">
+            Each application counts once, in the month ZAP records its first milestone — the point it
+            entered review. Stacks are the application&apos;s primary ZAP action type, the same
+            discretionary actions the map colours by; these are zoning actions, not construction
+            permits issued by the Department of Buildings.
+            {monthlyTrend.partialMonth && monthlyTrend.windowEnd
+              ? ` ${monthLabel(monthlyTrend.windowEnd)} is incomplete: collection stopped on ${formatDate(payload.collected_through)}.`
+              : ""}
+            {monthlyTrend.undatedCount
+              ? ` ${monthlyTrend.undatedCount} tracked record${monthlyTrend.undatedCount === 1 ? "" : "s"} carr${monthlyTrend.undatedCount === 1 ? "ies" : "y"} no milestone date and ${monthlyTrend.undatedCount === 1 ? "is" : "are"} excluded.`
+              : ""}
+          </p>
+
+          <MonthlyPipelineChart trend={monthlyTrend} collectedThrough={payload.collected_through} />
         </section>
 
         <section className="panel applicant-panel" aria-labelledby="applicants-heading">

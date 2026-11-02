@@ -78,6 +78,50 @@ class ZapGeographyCollectorTest(unittest.TestCase):
         self.assertEqual(row["action_codes"], [])
         self.assertEqual(row["geography_location_method"], "")
         self.assertEqual(row["geography_status"], "unmatched")
+        self.assertEqual(row["pipeline_start_date"], "")
+
+    def test_pipeline_start_date_is_the_earliest_actual_milestone(self):
+        extract = self.module["extract_project_data"]
+        row = extract(
+            "2026M0002",
+            {
+                "data": {"attributes": {"dcp-projectname": "Trend project"}},
+                "included": [
+                    {
+                        "type": "milestones",
+                        "attributes": {
+                            "display-name": "Certified / Referred",
+                            "dcp-actualstartdate": "2026-06-02T13:00:00.000Z",
+                            "dcp-actualenddate": "2026-06-09T13:00:00.000Z",
+                            "statuscode": "Completed",
+                        },
+                    },
+                    {
+                        "type": "milestones",
+                        "attributes": {
+                            "display-name": "Land Use Application Filed",
+                            "dcp-actualstartdate": "2025-11-04T09:00:00.000Z",
+                            "dcp-actualenddate": "2025-11-07T09:00:00.000Z",
+                            "statuscode": "Completed",
+                        },
+                    },
+                    {
+                        # Planned-only milestones must not set the entry month.
+                        "type": "milestones",
+                        "attributes": {
+                            "display-name": "Prepare Filed Land Use Application",
+                            "dcp-plannedstartdate": "2025-10-01T09:00:00.000Z",
+                            "dcp-actualstartdate": "",
+                            "dcp-actualenddate": "",
+                            "statuscode": "Not Started",
+                        },
+                    },
+                ],
+            },
+        )
+        self.assertEqual(row["milestone_date"], "2026-06-09")
+        self.assertEqual(row["pipeline_start_date"], "2025-11-04")
+        self.assertEqual(len(row["milestones"]), 2)
 
 
 if __name__ == "__main__":

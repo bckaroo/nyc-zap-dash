@@ -140,6 +140,20 @@ input:focus, select:focus, button:focus-visible, summary:focus-visible, a:focus-
 .map-chart-wrap .recharts-legend-item { margin: 2px 6px; }
 .map-chart-wrap .recharts-legend-item-text { white-space: normal; line-height: 1.3; }
 
+/* Trailing-12-month pipeline card */
+.pipeline-panel { border-top: 8px solid var(--green); }
+.pipeline-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 0 20px; border: 1px solid var(--line); background: var(--line); }
+.pipeline-metrics > div { background: var(--panel); padding: 16px 18px; }
+.pipeline-metrics span, .pipeline-metrics small { display: block; }
+.pipeline-metrics span { color: var(--muted); font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.pipeline-metrics strong { display: block; margin: 8px 0 6px; color: var(--green); font-family: Georgia, serif; font-size: clamp(1.6rem, 3vw, 2.2rem); font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+.pipeline-metrics strong.delta.down { color: var(--orange); }
+.pipeline-metrics small { color: var(--muted); font-size: .74rem; line-height: 1.4; }
+.pipeline-chart-wrap { padding: 8px 2px 0; }
+.pipeline-chart-wrap .chart-note, .pipeline-panel > .chart-note { font-size: .78rem; color: var(--muted); line-height: 1.5; margin: 0 0 12px; max-width: 780px; }
+.pipeline-chart-wrap .recharts-legend-item { margin: 2px 8px 2px 0; }
+.pipeline-chart-wrap .recharts-legend-item-text { white-space: normal; line-height: 1.3; }
+
 /* Compact chart tooltip */
 .action-tooltip {
   background: var(--card, #fffdf8);
@@ -200,6 +214,7 @@ footer p { margin: 0; }
   .map-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; }
   .map-legend h3:not(:first-child) { margin-top: 0; }
   .map-legend .legend-note, .choropleth-ramp { grid-column: 1 / -1; }
+  .pipeline-metrics { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {

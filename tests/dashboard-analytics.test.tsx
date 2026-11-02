@@ -6,7 +6,9 @@ import DashboardExplorer from "../src/components/DashboardExplorer";
 import {
   APPLICANT_CAVEAT,
   COVERAGE_DISCLOSURE,
+  OTHER_ACTIONS_CODE,
   SOURCE_ATTRIBUTION,
+  buildMonthlyActionTrend,
   buildOverview,
   computeApplicantLeaderboard,
   filterApplications,
@@ -207,6 +209,113 @@ describe("dashboard analytics", () => {
   });
 });
 
+describe("monthly pipeline-entry trend", () => {
+  function recordWith(overrides: Partial<DashboardRecord>): DashboardRecord {
+    return { ...records[0], ...overrides };
+  }
+
+  it("zero-fills the trailing 12 months anchored to the collection date", () => {
+    const trend = buildMonthlyActionTrend(
+      [
+        recordWith({ id: "A", pipeline_start_date: "2025-12-20", action_types: ["ZS"] }),
+        recordWith({ id: "B", pipeline_start_date: "2026-10-14", action_types: ["ZM"] }),
+        recordWith({ id: "C", pipeline_start_date: "2026-10-02", action_types: ["ZR"] }),
+      ],
+      "2026-11-02",
+    );
+
+    expect(trend.months).toHaveLength(12);
+    expect(trend.months[0]).toBe("2025-12");
+    expect(trend.months.at(-1)).toBe("2026-11");
+    expect(trend.rows.map((row) => row.total)).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0]);
+    expect(trend.rows.at(-1)?.label).toBe("Nov '26");
+    expect(trend.windowTotal).toBe(3);
+    expect(trend.undatedCount).toBe(0);
+    expect(trend.partialMonth).toBe(true);
+  });
+
+  it("counts an application in its pipeline-entry month, never by latest milestone", () => {
+    const trend = buildMonthlyActionTrend(
+      [
+        recordWith({
+          id: "A",
+          pipeline_start_date: "2025-12-20",
+          // Latest ZAP movement is nearly a year later; it must not move the bar.
+          milestone_date: "2026-10-30",
+          activity_date: "2026-10-30",
+          action_types: ["ZM"],
+        }),
+      ],
+      "2026-11-02",
+    );
+
+    expect(trend.rows[0]).toMatchObject({ month: "2025-12", total: 1, ZM: 1 });
+    expect(trend.rows.find((row) => row.month === "2026-10")?.total).toBe(0);
+  });
+
+  it("excludes records with no pipeline-entry date and reports them separately", () => {
+    const trend = buildMonthlyActionTrend(
+      [recordWith({ id: "A", pipeline_start_date: "", action_types: ["ZM"] })],
+      "2026-11-02",
+    );
+
+    expect(trend.windowTotal).toBe(0);
+    expect(trend.undatedCount).toBe(1);
+    expect(trend.categories).toEqual([]);
+  });
+
+  it("stacks by primary action type and folds the tail into one other bucket", () => {
+    const codes = [
+      ...Array.from({ length: 5 }, () => "ZM"),
+      ...Array.from({ length: 4 }, () => "ZR"),
+      ...Array.from({ length: 3 }, () => "ZS"),
+      ...Array.from({ length: 2 }, () => "ZA"),
+      ...Array.from({ length: 1 }, () => "MM"),
+    ];
+    const trend = buildMonthlyActionTrend(
+      codes.map((code, index) =>
+        recordWith({ id: `R${index}`, pipeline_start_date: "2026-05-10", action_types: [code] }),
+      ),
+      "2026-11-02",
+      12,
+      3,
+    );
+
+    expect(trend.categories.map((category) => category.code)).toEqual(["ZM", "ZR", "ZS", OTHER_ACTIONS_CODE]);
+    expect(trend.categories.at(-1)?.total).toBe(3);
+    expect(trend.groupedCodes).toEqual(["ZA", "MM"]);
+    const may = trend.rows.find((row) => row.month === "2026-05");
+    expect(may).toMatchObject({ total: 15, ZM: 5, ZR: 4, ZS: 3, [OTHER_ACTIONS_CODE]: 3 });
+  });
+
+  it("compares the window with the 12 months before it", () => {
+    const trend = buildMonthlyActionTrend(
+      [
+        ...Array.from({ length: 4 }, (_, index) =>
+          recordWith({ id: `cur${index}`, pipeline_start_date: "2026-06-15", action_types: ["ZM"] }),
+        ),
+        ...Array.from({ length: 2 }, (_, index) =>
+          recordWith({ id: `prev${index}`, pipeline_start_date: "2025-06-15", action_types: ["ZM"] }),
+        ),
+        // Older than either window: counted in neither.
+        recordWith({ id: "old", pipeline_start_date: "2024-06-15", action_types: ["ZM"] }),
+      ],
+      "2026-11-02",
+    );
+
+    expect(trend.windowTotal).toBe(4);
+    expect(trend.priorWindowTotal).toBe(2);
+    expect(trend.changePct).toBe(100);
+  });
+
+  it("returns an empty trend when the collection date is unusable", () => {
+    const trend = buildMonthlyActionTrend(records, "");
+    expect(trend.rows).toEqual([]);
+    expect(trend.windowTotal).toBe(0);
+    expect(trend.changePct).toBeNull();
+  });
+});
+
 describe("public labels and disclosures", () => {
   it("renders explicit empty and stale dataset states", () => {
     const html = renderToStaticMarkup(
@@ -272,6 +381,36 @@ describe("public labels and disclosures", () => {
     expect(html).toContain("expand-affordance\">View details");
     expect(html).not.toMatch(/Top Developers|Developer leaderboard/i);
     expect(html).not.toMatch(/DOB permits?|building permits?/i);
+  });
+
+  it("renders the trailing-12-month pipeline card with its measure disclosed", () => {
+    const datedRecords: DashboardRecord[] = [
+      { ...records[0], pipeline_start_date: "2026-07-08" },
+      { ...records[2], pipeline_start_date: "2026-08-19" },
+      { ...records[1], pipeline_start_date: "" },
+    ];
+    const html = renderToStaticMarkup(
+      <DashboardExplorer
+        payload={{
+          generated_at: "2026-11-02T12:00:00Z",
+          collected_through: "2026-11-02",
+          record_count: datedRecords.length,
+          source: {
+            name: "NYC Department of City Planning Zoning Application Portal",
+            url: "https://zap.planning.nyc.gov/projects",
+            api_url: "https://zap-api-production.herokuapp.com/projects",
+          },
+          records: datedRecords,
+        }}
+      />,
+    );
+
+    expect(html).toContain("Applications entering the pipeline per month");
+    expect(html).toContain("Trailing 12 months · market trend");
+    expect(html).toContain("Prior 12 months");
+    expect(html).toContain("Each application counts once");
+    expect(html).toMatch(/Dec\s*(?:&#x27;|')25/);
+    expect(html).not.toMatch(/permits per month/i);
   });
 
   it("renders applicant rows as keyboard-operable ARIA accordions with exact official project links", () => {

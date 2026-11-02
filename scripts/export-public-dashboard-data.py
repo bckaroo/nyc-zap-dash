@@ -39,6 +39,7 @@ PUBLIC_FIELDS = (
     "flood_zone_a",
     "flood_zone_shadedx",
     "milestone_date",
+    "pipeline_start_date",
     "certified_referred",
     "first_seen_date",
     "last_updated_date",

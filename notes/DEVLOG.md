@@ -199,3 +199,44 @@ Deviations accepted, recorded as follow-ups (not blockers):
   changed, because the exporter always rewrites `generated_at`. That keeps the
   freshness disclosure honest but is weekly PR noise; a future refinement is to
   compare everything except `generated_at` and skip when only that moved.
+
+## 2026-11-01 — Board task t_1876a925: trailing-12-month pipeline-entry card
+
+Added the market-trend card: **Applications entering the pipeline per month**, a
+stacked bar chart over the rolling 12 months ending at `collected_through`,
+stacked by the application's primary ZAP action type (the first listed code, the
+same convention the map colours by), with a prior-12-month baseline and
+year-over-year change.
+
+The measure required a new data contract, because none of the existing dates can
+answer "how many applications started that month":
+
+- `milestone_date` is the **latest** milestone, so counting by it pushes old
+  projects into the current month and manufactures growth. It remains the right
+  signal for freshness and the weekly feed; it is wrong for trends.
+- `first_seen_date` is a collector artifact (everything is stamped since 2026-07-01).
+
+The ZAP per-project API already returns the full milestone history, which the
+collector parsed but discarded. The collector now persists `pipeline_start_date`
+(earliest actual milestone date — pipeline entry) and `milestones_json` (full
+history, unused by the dashboard yet), self-healing both columns via `init_db`;
+`update_geography` refreshes them too so `--enrich-geography-only` can backfill
+without a scan. The exporter publishes `pipeline_start_date` as an allowlisted
+public field.
+
+Card behaviour: each application counts once, in its entry month, so stack height
+equals applications entering review that month (no double counting for
+multi-action filings); the eight largest action types are kept and the tail folds
+into "Other actions (n)"; records with no milestone date are excluded and counted
+in the note (18 of 242 in the 2026-11-02 collection). The collection month is
+disclosed as incomplete.
+
+Verification (2026-11-02 collection): `npm test` PASS — 25 Vitest (19 dashboard
+analytics + 6 map) and 30 Python tests; `npm run lint` clean; `npm run build`
+PASS. Live card reads 112 trailing-12-month entries against 101 in the prior year
+(+11%) for Dec '25–Nov '26. Screenshot QA at 1280px confirmed 12 labelled bars, a
+single-line legend, and no clipping.
+
+Operational follow-up: the systemd service was **not** restarted from this
+unattended run — run `systemctl --user restart zapdash.service` to serve the new
+build on 127.0.0.1:9003 and the tailnet route.

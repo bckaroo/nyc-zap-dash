@@ -1,4 +1,4 @@
-import type { MapPayload } from "./map-data";
+import { getActionStyle, type MapPayload } from "./map-data";
 
 export interface DashboardRecord {
   id: string;
@@ -17,6 +17,7 @@ export interface DashboardRecord {
   flood_zone_a: number;
   flood_zone_shadedx: number;
   milestone_date: string;
+  pipeline_start_date?: string;
   certified_referred: string;
   first_seen_date: string;
   last_updated_date: string;
@@ -143,6 +144,191 @@ export function monthlyActivityTrend(
   return [...counts.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([month, count]) => ({ month, count }));
+}
+
+export const MONTHLY_TREND_MONTHS = 12;
+export const MONTHLY_TREND_TOP_CATEGORIES = 8;
+export const OTHER_ACTIONS_CODE = "OTHER_ACTIONS";
+export const OTHER_ACTIONS_COLOR = "#6b7770";
+export const UNDATED_ACTION_CODE = "UNREPORTED";
+
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+export interface MonthlyActionCategory {
+  code: string;
+  label: string;
+  color: string;
+  total: number;
+}
+
+export interface MonthlyActionRow {
+  month: string;
+  label: string;
+  total: number;
+  [key: string]: number | string;
+}
+
+export interface MonthlyActionTrend {
+  months: string[];
+  rows: MonthlyActionRow[];
+  categories: MonthlyActionCategory[];
+  groupedCodes: string[];
+  windowStart: string;
+  windowEnd: string;
+  windowTotal: number;
+  priorWindowTotal: number;
+  changePct: number | null;
+  undatedCount: number;
+  partialMonth: boolean;
+}
+
+export function monthLabel(month: string): string {
+  const [year, index] = month.split("-").map(Number);
+  const name = MONTH_NAMES[index - 1];
+  if (!name || !Number.isFinite(year)) return month;
+  return `${name} '${String(year).slice(2)}`;
+}
+
+function shiftMonth(month: string, delta: number): string {
+  const [year, index] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, index - 1 + delta, 1)).toISOString().slice(0, 7);
+}
+
+/**
+ * Month an application entered the review pipeline, from the collector's
+ * earliest recorded ZAP milestone. milestone_date is deliberately NOT used:
+ * it tracks the latest movement of an already-filed application, so counting
+ * by it pushes old projects into recent months and invents growth.
+ */
+export function pipelineEntryMonth(record: DashboardRecord): string | null {
+  const value = record.pipeline_start_date ?? "";
+  return isValidDate(value) ? value.slice(0, 7) : null;
+}
+
+export function primaryActionCode(record: DashboardRecord): string {
+  const code = record.action_types?.find((value) => Boolean(value?.trim()));
+  return (code ?? UNDATED_ACTION_CODE).trim().toUpperCase();
+}
+
+/**
+ * New applications entering the ZAP review pipeline per month, stacked by the
+ * primary action type (the same first-listed code the map colours by). Each
+ * application is counted exactly once, in its entry month, so the stack height
+ * equals the number of applications that entered the pipeline that month.
+ */
+export function buildMonthlyActionTrend(
+  records: DashboardRecord[],
+  collectedThrough: string,
+  monthCount = MONTHLY_TREND_MONTHS,
+  topCategories = MONTHLY_TREND_TOP_CATEGORIES,
+): MonthlyActionTrend {
+  const end = utcDateOnly(collectedThrough);
+  const empty: MonthlyActionTrend = {
+    months: [],
+    rows: [],
+    categories: [],
+    groupedCodes: [],
+    windowStart: "",
+    windowEnd: "",
+    windowTotal: 0,
+    priorWindowTotal: 0,
+    changePct: null,
+    undatedCount: 0,
+    partialMonth: false,
+  };
+  if (!end || monthCount <= 0) return empty;
+
+  const endMonth = end.toISOString().slice(0, 7);
+  const firstMonth = shiftMonth(endMonth, -(monthCount - 1));
+  const months = Array.from({ length: monthCount }, (_, index) => shiftMonth(firstMonth, index));
+  const windowMonths = new Set(months);
+  const priorMonths = new Set(
+    Array.from({ length: monthCount }, (_, index) => shiftMonth(firstMonth, index - monthCount)),
+  );
+
+  const windowByCode = new Map<string, number>();
+  const monthByCode = new Map<string, Map<string, number>>();
+  let windowTotal = 0;
+  let priorWindowTotal = 0;
+  let undatedCount = 0;
+
+  for (const record of records) {
+    const month = pipelineEntryMonth(record);
+    if (!month) {
+      undatedCount += 1;
+      continue;
+    }
+    if (windowMonths.has(month)) {
+      const code = primaryActionCode(record);
+      windowTotal += 1;
+      windowByCode.set(code, (windowByCode.get(code) ?? 0) + 1);
+      const counts = monthByCode.get(month) ?? new Map<string, number>();
+      counts.set(code, (counts.get(code) ?? 0) + 1);
+      monthByCode.set(month, counts);
+      continue;
+    }
+    if (priorMonths.has(month)) priorWindowTotal += 1;
+  }
+
+  const ranked = [...windowByCode.entries()].sort(
+    ([leftCode, leftTotal], [rightCode, rightTotal]) =>
+      rightTotal - leftTotal || leftCode.localeCompare(rightCode),
+  );
+  const kept = ranked.slice(0, Math.max(0, topCategories));
+  const grouped = ranked.slice(kept.length);
+  const keptCodes = new Set(kept.map(([code]) => code));
+
+  const categories: MonthlyActionCategory[] = kept.map(([code, total]) => {
+    const style = getActionStyle(code);
+    return { code, label: style.label, color: style.color, total };
+  });
+  if (grouped.length) {
+    categories.push({
+      code: OTHER_ACTIONS_CODE,
+      label: `Other actions (${grouped.length})`,
+      color: OTHER_ACTIONS_COLOR,
+      total: grouped.reduce((sum, [, total]) => sum + total, 0),
+    });
+  }
+
+  const rows = months.map((month) => {
+    const row: MonthlyActionRow = { month, label: monthLabel(month), total: 0 };
+    for (const category of categories) row[category.code] = 0;
+    let total = 0;
+    for (const [code, count] of monthByCode.get(month) ?? []) {
+      total += count;
+      if (keptCodes.has(code)) {
+        row[code] = (row[code] as number) + count;
+      } else {
+        row[OTHER_ACTIONS_CODE] = (row[OTHER_ACTIONS_CODE] as number) + count;
+      }
+    }
+    row.total = total;
+    return row;
+  });
+
+  const lastDayOfEndMonth = new Date(
+    Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+
+  return {
+    months,
+    rows,
+    categories,
+    groupedCodes: grouped.map(([code]) => code),
+    windowStart: months[0],
+    windowEnd: endMonth,
+    windowTotal,
+    priorWindowTotal,
+    changePct: priorWindowTotal > 0
+      ? Math.round(((windowTotal - priorWindowTotal) / priorWindowTotal) * 100)
+      : null,
+    undatedCount,
+    partialMonth: end.getUTCDate() < lastDayOfEndMonth,
+  };
 }
 
 export function selectWeeklyHighlights(

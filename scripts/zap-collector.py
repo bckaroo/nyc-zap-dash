@@ -187,6 +187,12 @@ def extract_project_data(pid, api_data):
             [m["start"] for m in milestones if m["start"]]
     milestone_date = max(dates) if dates else ""
 
+    # Pipeline entry date: the earliest recorded milestone. This is the only
+    # durable "when did this application enter the review pipeline" signal —
+    # milestone_date tracks the LATEST movement and drifts forward over time,
+    # so it must never be used for month-over-month filing trends.
+    pipeline_start_date = min(dates) if dates else ""
+
     return {
         "id": pid,
         "project_id": pid,
@@ -204,6 +210,7 @@ def extract_project_data(pid, api_data):
         "flood_zone_a": fz_a,
         "flood_zone_shadedx": fz_shaded,
         "milestone_date": milestone_date,
+        "pipeline_start_date": pipeline_start_date,
         "certified_referred": certified,
         "noticed_date": noticed,
         "milestones": milestones,
@@ -237,6 +244,8 @@ DB_COLUMNS = {
     "flood_zone_a": "INTEGER DEFAULT 0",
     "flood_zone_shadedx": "INTEGER DEFAULT 0",
     "milestone_date": "TEXT",
+    "pipeline_start_date": "TEXT",
+    "milestones_json": "TEXT",
     "certified_referred": "TEXT",
     "noticed_date": "TEXT",
     "first_seen_date": "TEXT DEFAULT CURRENT_TIMESTAMP",
@@ -273,11 +282,12 @@ def upsert(conn, row, today):
             community_district, public_status, ulurp_non, ceqr_number,
             ceqr_type, eas_eis, primary_applicant, applicant_type,
             flood_zone_a, flood_zone_shadedx, milestone_date,
+            pipeline_start_date, milestones_json,
             certified_referred, noticed_date, last_updated_date,
             bbls_json, bbl_featurecollection_json, action_codes_json,
             geography_location_method, geography_location_source,
             geography_enriched_at, geography_status
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
             project_name=excluded.project_name,
             project_brief=excluded.project_brief,
@@ -293,6 +303,8 @@ def upsert(conn, row, today):
             flood_zone_a=excluded.flood_zone_a,
             flood_zone_shadedx=excluded.flood_zone_shadedx,
             milestone_date=excluded.milestone_date,
+            pipeline_start_date=excluded.pipeline_start_date,
+            milestones_json=excluded.milestones_json,
             certified_referred=excluded.certified_referred,
             noticed_date=excluded.noticed_date,
             last_updated_date=excluded.last_updated_date,
@@ -308,7 +320,10 @@ def upsert(conn, row, today):
         row["borough"], row["community_district"], row["public_status"],
         row["ulurp_non"], row["ceqr_number"], row["ceqr_type"], row["eas_eis"],
         row["primary_applicant"], row["applicant_type"], row["flood_zone_a"],
-        row["flood_zone_shadedx"], row["milestone_date"], row["certified_referred"],
+        row["flood_zone_shadedx"], row["milestone_date"],
+        row["pipeline_start_date"],
+        json.dumps(row["milestones"], separators=(",", ":")),
+        row["certified_referred"],
         row["noticed_date"], today,
         json.dumps(row["bbls"], separators=(",", ":")),
         json.dumps(row["bbl_featurecollection"], separators=(",", ":")),
@@ -335,7 +350,8 @@ def update_geography(conn, row, enriched_at):
         UPDATE zap_applications SET
             bbls_json=?, bbl_featurecollection_json=?, action_codes_json=?,
             geography_location_method=?, geography_location_source=?,
-            geography_enriched_at=?, geography_status=?
+            geography_enriched_at=?, geography_status=?,
+            pipeline_start_date=?, milestones_json=?
         WHERE id=?
         """,
         (
@@ -343,7 +359,10 @@ def update_geography(conn, row, enriched_at):
             json.dumps(row["bbl_featurecollection"], separators=(",", ":")),
             json.dumps(row["action_codes"], separators=(",", ":")),
             row["geography_location_method"], row["geography_location_source"],
-            enriched_at, row["geography_status"], row["id"],
+            enriched_at, row["geography_status"],
+            row["pipeline_start_date"],
+            json.dumps(row["milestones"], separators=(",", ":")),
+            row["id"],
         ),
     )
 

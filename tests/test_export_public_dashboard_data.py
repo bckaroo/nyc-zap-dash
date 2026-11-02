@@ -28,6 +28,7 @@ SEED_TABLE = """
         flood_zone_a INTEGER,
         flood_zone_shadedx INTEGER,
         milestone_date TEXT,
+        pipeline_start_date TEXT,
         certified_referred TEXT,
         first_seen_date TEXT,
         last_updated_date TEXT,
@@ -47,7 +48,7 @@ SEED_ROW = """
         '2026K0001', '2026K0001', 'Test Project', 'Public source brief',
         'Brooklyn', 'K08', 'Filed', 'ULURP', '26DCP001K', 'Unlisted',
         'EAS', 'Named Applicant LLC', 'Private', 0, 1,
-        '2026-09-15', '2026-08-01', '2026-07-01', '2026-10-01',
+        '2026-09-15', '2025-11-04', '2026-08-01', '2026-07-01', '2026-10-01',
         'internal-only', '["3012340056"]',
         '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"bbl":"3012340056"},"geometry":{"type":"Polygon","coordinates":[[[-73.96,40.67],[-73.95,40.67],[-73.95,40.68],[-73.96,40.67]]]}}]}',
         '["ZM"]', 'zap_bbl_polygon', 'ZAP bbl-featurecollection',
@@ -103,6 +104,7 @@ class PublicDashboardExportTest(unittest.TestCase):
                     "flood_zone_a": 0,
                     "flood_zone_shadedx": 1,
                     "milestone_date": "2026-09-15",
+                    "pipeline_start_date": "2025-11-04",
                     "certified_referred": "2026-08-01",
                     "first_seen_date": "2026-07-01",
                     "last_updated_date": "2026-10-01",
@@ -156,11 +158,13 @@ class PublicDashboardExportTest(unittest.TestCase):
                     "community_district", "public_status", "ulurp_non", "ceqr_number",
                     "ceqr_type", "eas_eis", "primary_applicant", "applicant_type",
                     "flood_zone_a", "flood_zone_shadedx", "milestone_date",
+                    "pipeline_start_date",
                     "certified_referred", "first_seen_date", "last_updated_date",
                     "activity_date", "source_url", "action_types", "location_method", "location_source",
                 },
             )
             self.assertEqual(record["activity_date"], "2026-09-15")
+            self.assertEqual(record["pipeline_start_date"], "2025-11-04")
             self.assertEqual(record["source_url"], "https://zap.planning.nyc.gov/projects/2026K0001")
             self.assertEqual(record["action_types"], ["ZM"])
             self.assertEqual(record["location_method"], "zap_bbl_polygon")

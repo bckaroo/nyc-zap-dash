@@ -311,19 +311,38 @@ def read_records(db_path: Path) -> list[dict[str, Any]]:
     )
 
 
-def read_collector_state(db_path: Path) -> dict[str, Any]:
+RECENT_RUN_LIMIT = 8
+COLLECTOR_RUN_FIELDS = ("started_at", "finished_at", "status", "records_upserted")
+COLLECTOR_STATUSES = ("ok", "error", "running")
+
+
+def read_collector_state(db_path: Path, exported_at: str | None = None) -> dict[str, Any]:
     """Read run-ledger facts for the public payload.
 
     Only ``status='ok'`` runs count as a successful refresh: a row left in 'running'
     is a crashed run, and an 'error' row is a failed one. A database predating the
     ledger (or a missing file) yields nulls rather than an exception, so the exporter
     keeps working and the freshness gate falls back to ``collected_through``.
+
+    ``exported_at`` and ``recent_runs`` exist so a consumer can tell "a run happened
+    recently" from "the run behind this export worked". ``last_success_at`` alone
+    cannot: a run that hangs stays 'running' and leaves the last success a full cycle
+    back, and the crash sweep only demotes it on the *next* start, by which point that
+    week's collection is missing from a payload that looks entirely healthy. The lag
+    between ``exported_at`` and ``last_success_at`` closes that gap, and the run list
+    lets a consumer judge a zero-upsert streak without inferring it from one row.
+
+    ``recent_runs`` is the newest ``RECENT_RUN_LIMIT`` runs, newest first -- eight at a
+    weekly cadence is two months of coverage and still small enough to ship to a
+    browser. Unbounded history is the database's job, not the payload's.
     """
     state: dict[str, Any] = {
         "last_success_at": None,
         "last_run_at": None,
         "last_status": None,
         "last_records_upserted": None,
+        "exported_at": exported_at,
+        "recent_runs": [],
     }
     if not db_path.is_file():
         return state
@@ -337,10 +356,21 @@ def read_collector_state(db_path: Path) -> dict[str, Any]:
             }
             if "zap_collector_runs" not in tables:
                 return state
-            latest = connection.execute(
+            rows = connection.execute(
                 "SELECT started_at, finished_at, records_upserted, status"
-                " FROM zap_collector_runs ORDER BY run_id DESC LIMIT 1"
-            ).fetchone()
+                " FROM zap_collector_runs ORDER BY run_id DESC LIMIT ?",
+                (RECENT_RUN_LIMIT,),
+            ).fetchall()
+            state["recent_runs"] = [
+                {
+                    "started_at": clean(started_at),
+                    "finished_at": clean(finished_at),
+                    "status": clean(status),
+                    "records_upserted": records_upserted,
+                }
+                for started_at, finished_at, records_upserted, status in rows
+            ]
+            latest = rows[0] if rows else None
             if latest is not None:
                 state["last_run_at"] = clean(latest[1] or latest[0])
                 state["last_status"] = clean(latest[3])
@@ -367,7 +397,7 @@ def build_payload(db_path: Path, generated_at: str) -> dict[str, Any]:
     return {
         "generated_at": generated_at,
         "collected_through": collected_through,
-        "collector": read_collector_state(db_path),
+        "collector": read_collector_state(db_path, exported_at=generated_at),
         "source": SOURCE,
         "record_count": len(records),
         "boundaries": BOUNDARY_SOURCES,
@@ -385,6 +415,57 @@ def export(db_path: Path, output_path: Path, generated_at: str) -> dict[str, Any
     return payload
 
 
+def parse_iso_timestamp(value: Any, field: str) -> datetime:
+    """Parse an ISO-8601 timestamp from the payload, tolerating a trailing Z."""
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid dashboard payload: {field} is not an ISO-8601 timestamp: {value!r}"
+        ) from exc
+
+
+def validate_collector_state(collector: dict[str, Any]) -> None:
+    """Reject collector metadata a consumer cannot assert on.
+
+    The gate and the cron-side checks read these fields directly, so a malformed
+    payload must fail here rather than turn a liveness assertion into a TypeError
+    three systems downstream.
+    """
+    exported_at = collector.get("exported_at")
+    if exported_at not in (None, ""):
+        parse_iso_timestamp(exported_at, "collector.exported_at")
+    recent_runs = collector.get("recent_runs", [])
+    if not isinstance(recent_runs, list):
+        raise ValueError("Invalid dashboard payload: collector.recent_runs malformed")
+    if len(recent_runs) > RECENT_RUN_LIMIT:
+        raise ValueError(
+            "Invalid dashboard payload: collector.recent_runs exceeds "
+            f"{RECENT_RUN_LIMIT} entries"
+        )
+    for run in recent_runs:
+        if not isinstance(run, dict):
+            raise ValueError("Invalid dashboard payload: collector.recent_runs entry malformed")
+        missing = [field for field in COLLECTOR_RUN_FIELDS if field not in run]
+        if missing:
+            raise ValueError(
+                "Invalid dashboard payload: collector.recent_runs entry missing "
+                + ", ".join(missing)
+            )
+        status = run.get("status")
+        if status not in COLLECTOR_STATUSES:
+            raise ValueError(
+                "Invalid dashboard payload: collector.recent_runs entry has unknown "
+                f"status {status!r}"
+            )
+        for field in ("started_at", "finished_at"):
+            if run.get(field) not in (None, ""):
+                parse_iso_timestamp(run[field], f"collector.recent_runs[].{field}")
+
+
 def validate_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
         raise ValueError("Invalid dashboard payload: records missing")
@@ -395,6 +476,8 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     collector = payload.get("collector")
     if collector is not None and not isinstance(collector, dict):
         raise ValueError("Invalid dashboard payload: collector metadata malformed")
+    if isinstance(collector, dict):
+        validate_collector_state(collector)
     map_payload = payload.get("map")
     if not isinstance(map_payload, dict):
         raise ValueError("Invalid dashboard payload: map payload missing")

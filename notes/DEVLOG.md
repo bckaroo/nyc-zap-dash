@@ -579,10 +579,53 @@ already covers the loud case.
   the liveness assertion dormant. So the procedure gains one line, before anyone writes
   "pre-ledger" next to a null block:
 
-  > `python3 -c "import sqlite3;c=sqlite3.connect('data/zap-applications.db');print([r for r in c.execute(\"select name from sqlite_master where type='table'\")]);print(c.execute('select count(*) from zap_collector_runs').fetchone())"`
+  > `python3 -c "import sqlite3;c=sqlite3.connect('data/zap-applications.db');print([r for r in c.execute(\"select name from sqlite_master where type='table'\")])"`
 
-  Table present and rows counting up is a real ledger read; table absent is genuinely
-  pre-ledger; a `sqlite3.Error` from that command is a ledger nobody can see, and the run
-  stops there rather than shipping a green. The export now writes the same distinction to
-  stderr (`note:` for absent, `warning:` for unreadable) precisely so the operator does not
-  have to reverse-engineer it, but stderr is not the artifact — the query is the check.
+  **Order matters, and the one-liner above got it wrong the first time.** A command that
+  runs the count first cannot tell the benign case from the broken one: on a database that
+  predates the ledger, `select count(*) from zap_collector_runs` raises `no such table`, and
+  that is "nothing there yet", not "cannot see it" — the same conflation this task spent a
+  week removing from the exporter. So the order is the check:
+
+  - table **absent** from the `sqlite_master` list — genuinely pre-ledger; report the nulls
+    as normal and let the gate take its staleness fallback. Not a failure.
+  - table **present** — run the count; rows counting up is a real ledger read.
+  - table **present** and the count still raises — the only true read failure, and the only
+    case that stops the run.
+
+  The export writes the same distinction to stderr (`note:` for absent, `warning:` for
+  unreadable) so the operator does not have to reverse-engineer it, but stderr is not the
+  artifact — the ordered query is the check.
+
+- **The Monday 07:30 readback is a scheduled job, and it is read-only by construction.**
+  Job `2be5cabacb08` (`once` at 2026-11-09T07:30:00-05:00, still armed — the rehearsal fire
+  did not consume it). It runs `~/.hermes/profiles/builder/scripts/zap_readback.py` as its
+  pre-run script. That path is deliberately outside this repo: the cron job's script slot
+  only accepts a path under the profile's own `scripts/` directory, so the file cannot be
+  the versioned copy even though the code arguably belongs here — treat the profile copy as
+  the artifact of record for now and copy it back into `scripts/` if it ever grows past a
+  readback. It does
+  `git fetch origin main` and then measures `git show origin/main:src/data/public-dashboard-data.json`
+  in a temp file: gate, sha256, byte count, payload facts and the ordered ledger check all
+  against the committed object. No checkout, no pull, no write — so it measures what the
+  public site serves, and a dirty worktree (whosever) cannot change the answer.
+
+  Three things about it that are deliberate and should survive the next edit:
+
+  - **`record_count` is an observation, not a contract.** The key set is pinned to the four
+    fields; the count is this week's data. It is reported as `record_count: N (was 242)` and
+    flagged only if missing, null or implausibly low. A weekend ingest that lifts 242 to 243
+    is a successful Monday, not a mismatch.
+  - **It is a `once` with no retry, on purpose.** The failure we actually model is a missing
+    or unreadable ledger table, and a second run forty minutes later produces the same
+    missing table; a retry only covers a transient model or network failure, which one hand
+    re-run fixes. The failure path is loud instead: `failure_deliver` is `origin,bot-chat:ops`,
+    so a dead fire announces itself rather than being saved locally and forgotten.
+  - **Nothing in the prompt names a messaging tool.** A cron session does not expose
+    `message_agent`; a job told to "message ops" will find the transport underneath it and
+    send anyway, silently and by an undocumented path. The destination lives in `deliver`,
+    the prompt says the final response is the report, and that is the whole contract.
+
+  Hand re-run, which is the recovery for everything above:
+
+  > `python3 /home/abuck/.hermes/profiles/builder/scripts/zap_readback.py`

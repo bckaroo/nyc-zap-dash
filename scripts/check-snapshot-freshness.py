@@ -172,6 +172,10 @@ def check_liveness(
 ) -> int:
     raw_success = collector.get("last_success_at")
     last_status = collector.get("last_status")
+    # Display only. On a swept row ``last_run_at`` is the time the *next* run declared the
+    # run dead, not the time it last did work, so it looks freshly touched while the work
+    # behind it is a full cycle old. Nothing below may assert on it: liveness keys on
+    # ``last_success_at``, which only ever comes from a run that recorded status='ok'.
     last_run_at = collector.get("last_run_at")
     run_context = (
         f"last_run_at={last_run_at or 'never'} status={last_status or 'unknown'}"

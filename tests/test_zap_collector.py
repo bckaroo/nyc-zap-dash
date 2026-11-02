@@ -1,3 +1,4 @@
+import datetime as dt
 import runpy
 import sqlite3
 import tempfile
@@ -193,6 +194,30 @@ class ZapCollectorRunLedgerTest(unittest.TestCase):
         self.assertEqual(rows[0][1], "2026-11-02T06:45:00+00:00")
         self.assertIn("did not finish", rows[0][4])
         self.assertEqual(rows[1][3], "running")
+
+    def test_a_swept_runs_finished_at_is_the_declaration_time_not_the_death_time(self):
+        # The sweep stamps the hung row with the *sweeping* run's start, so a Monday run
+        # that hangs and is swept the next Monday shows a finished_at a week after its
+        # started_at. That is how long it went unnoticed, not how long it ran: a consumer
+        # computing a duration would read 604800s and believe it. Pinned here so nobody
+        # "fixes" the sweep into writing a death time it cannot know.
+        self.conn.execute(
+            "INSERT INTO zap_collector_runs (started_at, status) VALUES (?, 'running')",
+            ("2026-10-26T06:45:00+00:00",),
+        )
+        self.conn.commit()
+        self.module["start_run"](self.conn, "2026-11-02T06:45:00+00:00")
+        swept_started_at, swept_finished_at, _, swept_status, _ = self.rows()[0]
+        self.assertEqual(swept_status, "error")
+        self.assertEqual(swept_finished_at, "2026-11-02T06:45:00+00:00")
+        self.assertEqual(
+            (dt.datetime.fromisoformat(swept_finished_at)
+             - dt.datetime.fromisoformat(swept_started_at)).total_seconds(),
+            7 * 24 * 3600,
+        )
+        # And the sweep must not manufacture a success: the newest 'ok' row is still the
+        # previous week's, which is the only thing liveness may key on.
+        self.assertEqual([r for r in self.rows() if r[3] == "ok"], [])
 
     def test_a_new_run_does_not_disturb_the_previous_success(self):
         first = self.module["start_run"](self.conn, "2026-10-26T06:45:00+00:00")

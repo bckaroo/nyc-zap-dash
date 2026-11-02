@@ -339,6 +339,22 @@ def read_collector_state(db_path: Path, exported_at: str | None = None) -> dict[
     ``recent_runs`` is the newest ``RECENT_RUN_LIMIT`` runs, newest first -- eight at a
     weekly cadence is two months of coverage and still small enough to ship to a
     browser. Unbounded history is the database's job, not the payload's.
+
+    Two field semantics a consumer will otherwise get wrong, because they are the only
+    two places the ledger reports a *declaration* rather than an *event*:
+
+    * ``finished_at`` on a non-'ok' row is the time the run was **declared** dead, not the
+      time it died. ``start_run`` sweeps a still-'running' row and stamps it with the
+      *sweeping* run's start, so a Monday run that hangs and is swept the following Monday
+      carries ``finished_at`` a week after its ``started_at``. Its duration is therefore
+      meaningless: 604800 seconds is not a week-long collection, it is a run that was
+      noticed a week later.
+    * ``last_run_at`` is the newest run's ``started_at``, so on a swept row it is the
+      sweep boundary and looks freshly touched while the work behind it is a cycle old.
+
+    Never derive "did this run finish" from ``finished_at`` arithmetic, and never read
+    recency off ``last_run_at``. Key both on ``status`` plus ``last_success_at``, which
+    only ever comes from a row that recorded 'ok'. The freshness gate does exactly that.
     """
     state: dict[str, Any] = {
         "last_success_at": None,

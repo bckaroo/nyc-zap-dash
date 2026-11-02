@@ -292,6 +292,14 @@ def start_run(conn, started_at):
     weekly cron is single-instance and finished rows are closed before exit. Marking
     it 'error' keeps the ledger honest without wrapping the whole collector body in
     exception handling.
+
+    What the sweep writes into ``finished_at`` is a *declaration* time, not a death
+    time: it is ``started_at`` of the run doing the sweeping, i.e. the moment somebody
+    finally noticed. A run that hangs on a Monday and is swept the next Monday gets a
+    ``finished_at`` a week after its ``started_at``, so start-to-finish arithmetic on a
+    swept row measures how long it went unnoticed, not how long it ran. Nothing may
+    compute a duration or a "has this finished yet" answer from ``finished_at``; key
+    liveness on the newest row with status='ok' (the exported ``last_success_at``).
     """
     conn.execute(
         "UPDATE zap_collector_runs SET status='error', finished_at=COALESCE(finished_at, ?),"

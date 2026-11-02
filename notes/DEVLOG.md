@@ -480,3 +480,27 @@ already covers the loud case.
   they should not be depending on our defaults being right. Two fields carrying one number
   is duplication; a consumer that verifies rather than assumes is not. Suite at 70.
 
+- **`finished_at` on a swept row is a declaration time, not a death time.** Ops found this
+  by arithmetic on the live export rather than by reading my code: the swept row's
+  `finished_at` is 13:52:22.581400, bit-identical to the *next* run's `started_at`, because
+  the crash sweep stamps a hung row with the start of the run that finally noticed it. Two
+  consequences, both now stated where the fields are defined and pinned by tests:
+
+  1. **Duration is meaningless for a swept row.** Mine reads 441.6 s only because the
+     timeout happened to be minutes. A Monday run swept the following Monday would publish
+     604,800 s, and anyone graphing start-to-finish time would be reading a week-long
+     collection that lasted no such thing.
+  2. **`last_run_at` is not evidence of activity**, for the same reason — on a swept row it
+     is the sweep boundary, so it looks freshly touched while the work behind it is a cycle
+     old. Liveness has to key on `last_success_at`, which only ever comes from an `ok` row.
+
+  Rule, written into `start_run`, `read_collector_state`, and beside the gate's use of
+  `last_run_at`: **never derive "did this run finish" from `finished_at` arithmetic, and
+  never read recency off `last_run_at`; key both on `status` plus `last_success_at`.** The
+  gate already did that, so nothing was broken — the defect was that a consumer could not
+  have known. A field whose name promises an event and whose value records a declaration is
+  worse than a missing field, because it invites exactly the arithmetic ops did.
+
+  Suite at 72 (both new tests fail if the sweep is ever "fixed" to invent a death time, or
+  if the exporter starts deriving recency from `last_run_at`).
+

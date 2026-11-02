@@ -124,5 +124,87 @@ class ZapGeographyCollectorTest(unittest.TestCase):
         self.assertEqual(len(row["milestones"]), 2)
 
 
+class ZapCollectorRunLedgerTest(unittest.TestCase):
+    """The ledger is what makes an empty-but-successful run distinguishable from a
+    collector that never ran. These tests pin the state machine."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.module = runpy.run_path(str(COLLECTOR))
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db_path = Path(self._tmp.name) / "zap.db"
+        self.conn = sqlite3.connect(self.db_path)
+        self.addCleanup(self.conn.close)
+        self.module["init_db"](self.conn)
+
+    def rows(self):
+        return self.conn.execute(
+            "SELECT started_at, finished_at, records_upserted, status, error"
+            " FROM zap_collector_runs ORDER BY run_id"
+        ).fetchall()
+
+    def test_init_db_creates_the_ledger(self):
+        tables = {
+            row[0]
+            for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        self.assertIn("zap_collector_runs", tables)
+
+    def test_start_run_opens_a_running_row(self):
+        run_id = self.module["start_run"](self.conn, "2026-11-02T06:45:00+00:00")
+        self.assertIsInstance(run_id, int)
+        self.assertEqual(
+            self.rows(), [("2026-11-02T06:45:00+00:00", None, 0, "running", None)]
+        )
+
+    def test_finish_run_records_success_and_upsert_count(self):
+        run_id = self.module["start_run"](self.conn, "2026-11-02T06:45:00+00:00")
+        self.module["finish_run"](
+            self.conn, run_id, "2026-11-02T07:02:00+00:00", 241, "ok"
+        )
+        self.assertEqual(
+            self.rows(),
+            [("2026-11-02T06:45:00+00:00", "2026-11-02T07:02:00+00:00", 241, "ok", None)],
+        )
+
+    def test_empty_successful_run_is_recorded_as_ok(self):
+        # Zero upserts must still be a success: the collector ran and found nothing new.
+        run_id = self.module["start_run"](self.conn, "2026-11-02T06:45:00+00:00")
+        self.module["finish_run"](
+            self.conn, run_id, "2026-11-02T06:46:00+00:00", 0, "ok"
+        )
+        self.assertEqual(self.rows()[0][3], "ok")
+        self.assertEqual(self.rows()[0][2], 0)
+
+    def test_start_run_reclassifies_a_crashed_run_as_error(self):
+        # Simulate a run killed mid-flight: the row stays 'running'. The next run must
+        # convert it to an error rather than leave a phantom live run behind.
+        self.conn.execute(
+            "INSERT INTO zap_collector_runs (started_at, status) VALUES (?, 'running')",
+            ("2026-10-26T06:45:00+00:00",),
+        )
+        self.conn.commit()
+        self.module["start_run"](self.conn, "2026-11-02T06:45:00+00:00")
+        rows = self.rows()
+        self.assertEqual(rows[0][3], "error")
+        self.assertEqual(rows[0][1], "2026-11-02T06:45:00+00:00")
+        self.assertIn("did not finish", rows[0][4])
+        self.assertEqual(rows[1][3], "running")
+
+    def test_a_new_run_does_not_disturb_the_previous_success(self):
+        first = self.module["start_run"](self.conn, "2026-10-26T06:45:00+00:00")
+        self.module["finish_run"](
+            self.conn, first, "2026-10-26T07:02:00+00:00", 240, "ok"
+        )
+        self.module["start_run"](self.conn, "2026-11-02T06:45:00+00:00")
+        successes = [
+            row for row in self.rows() if row[3] == "ok"
+        ]
+        self.assertEqual(successes, [("2026-10-26T06:45:00+00:00", "2026-10-26T07:02:00+00:00", 240, "ok", None)])
+
+
 if __name__ == "__main__":
     unittest.main()

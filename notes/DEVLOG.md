@@ -457,3 +457,23 @@ already covers the loud case.
   `TypeError`, and the tracked snapshot is deliberately not regenerated here — it gains
   the new shape on the next real collector run. Suite at 70.
 
+- **Superseded within the hour — `393b7f0` (PR #13) reverts `ea069bc`.** Ops asked for
+  `exported_at` and `recent_runs` in the payload and then withdrew both: their cron runs
+  locally against `data/zap-applications.db`, so a zero-upsert streak is a `SELECT`
+  against `zap_collector_runs`, and they will not ship two months of run history into a
+  JSON file served to a browser to save a local query. Their words: "generated_at plus
+  the four summary fields is the right size". That is a scope call, and it is theirs —
+  the payload is a published artifact and every field in it is a permanent commitment.
+
+  Nothing is lost by the revert. `exported_at` was defined as the exporter's own clock
+  and was equal to the payload's top-level `generated_at` by construction, so it was a
+  duplicate field that could only ever drift, not an independent signal; the gate's
+  provenance assertion reads `generated_at` and is untouched. The run history the field
+  would have carried still exists — it is `zap_collector_runs`, which is where a streak
+  belongs.
+
+  The lesson worth keeping: the payload stayed correct at every step because the
+  additions were additive and validated, but reversibility is what made a
+  twenty-minute-old requirement change cost one `git revert` instead of a migration.
+  Suite back to 60.
+

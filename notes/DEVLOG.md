@@ -547,3 +547,26 @@ already covers the loud case.
   fields it checked; what remains of validation is that the block is an object when
   present, and that absence is not an error, because an older snapshot must still
   validate. Suite at 67.
+
+- **The principle the withdrawn field was hiding, kept where it can still be read.** The
+  `RECENT_RUN_LIMIT` guard protected a rule that outlives it: the published payload carries
+  data plus minimal provenance; run history is a ledger query; **any widening of the payload
+  comes back to ops before it lands.** That is a standing constraint on the artifact, not on
+  one field, so it does not expire with `recent_runs`.
+
+  Two things the removal taught that are worth more than the fields were. First, a test whose
+  only job is to keep two copies of one value from diverging — `exported_at == generated_at`
+  — is a test defending a mistake; it went with the field, and nothing was lost. Second, the
+  reason to do an invisible change while it is invisible: today the tracked snapshot has no
+  consumers, so the shape change costs nothing; a week from now the same edit is a public
+  contract alteration. Cheap now, expensive later is the entire argument.
+
+  **On how to read today's gate result.** The gate is green on one live assertion and three
+  dormant ones. The freshness assertion (snapshot age against `collected_through`, max 10
+  days) is genuinely live. The liveness assertion — the actual point of the ledger — is
+  dormant until a run records itself: `035cf26` shipped the ledger at 07:43 on 2026-11-02,
+  and the Monday collector run that produced the current snapshot had already happened at
+  06:54, so `data/zap-applications.db` has no `zap_collector_runs` table yet and the gate
+  takes its documented pre-ledger fallback. "The gate passes" overstates this week's green;
+  "one live assertion and three dormant ones" is the honest sentence, and it is what belongs
+  in the CI history next to the run.

@@ -167,11 +167,11 @@ snapshot went stale, and nothing refreshed it after the collector ran.
   misses are free. `tests/test_zap_collector_workers.py` asserts serial and
   `--workers 2` produce identical rows, totals and week pool (timestamps excluded).
 - **DEV-339 — weekly snapshot PR.** `~/.hermes/profiles/ops/scripts/zap-snapshot-pr.sh`
-  (Hermes cron `6a38ad31e5c2`, `15 6 * * 1`, America/New_York, no-agent, delivered to
-  bot-chat:ops — runs 15 minutes after the 06:00 collector). It re-exports the
+  (Hermes cron `6a38ad31e5c2`, `45 6 * * 1`, America/New_York, no-agent, delivered to
+  bot-chat:ops — starts 45 minutes after the 06:00 collector and waits if it is still running). It re-exports the
   snapshot from the canonical DB; if it changed, it commits to `snapshot/dashboard-<date>`,
-  opens a PR, merges (auto-merge, falling back to a direct squash merge when the repo
-  does not allow auto-merge), and then **verifies the Pages run by matching the merge
+  opens a PR, requests squash auto-merge only (no direct-merge fallback; refusal
+  leaves the PR open and exits non-zero), and then **verifies the Pages run by matching the merge
   commit SHA** rather than accepting that "a run exists". First live run:
   PR #1 → squash-merged `bf87557` (that squashed commit message still reads
   `DEV-52003`, a mis-transcribed id from the first report; DEV-339 is the board

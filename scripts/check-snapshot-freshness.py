@@ -156,6 +156,24 @@ def check_liveness(
         f" records={collector.get('last_records_upserted', 'unknown')}"
     )
 
+    # A recorded failure is a failure on its own, however fresh the dates look. A run
+    # that errored means the most recent attempt to collect died, so this snapshot is
+    # at least one cycle behind whatever the last good run wrote. Nothing else asserts
+    # it: the dates were all written by the previous successful run and stay current
+    # until they age past the window. Checked before the pre-ledger fallback because a
+    # ledger that has recorded only failures still has nothing older to fall back to.
+    if last_status is not None and str(last_status).strip().lower() == "error":
+        print(
+            "FAIL (collector run failed): the most recent collector run recorded "
+            f"status=error. {run_context}\n"
+            "The snapshot still carries the dates of the last successful run, so the "
+            "staleness and collector-age assertions cannot see this on their own.\n"
+            "Fix: get the collector running again, then --\n"
+            "  python3 scripts/zap-collector.py\n"
+            "  python3 scripts/export-public-dashboard-data.py --update-snapshot"
+        )
+        return 1
+
     if raw_success is None or (isinstance(raw_success, str) and not raw_success.strip()):
         print(
             "OK (live): no collector run recorded in this snapshot (pre-ledger "

@@ -365,3 +365,46 @@ Pushed to `main` as `af65aaa` and verified on the PUBLIC Pages copy
 
 Still outstanding (operator): bounce `zapdash.service` so 127.0.0.1:9003 serves
 the new bundle - unattended runs cannot perform service lifecycle actions.
+
+## 2026-11-02 — DEV-343: collector run ledger and the liveness assertion
+
+`snapshot-freshness` (DEV-341) compared `collected_through` against the commit
+date, and `collected_through` is `max(last_updated_date)` — a value the
+collector stamps with its own run date. So the gate already measured run
+recency rather than DOB filing recency. What it could not see:
+
+- A run that succeeds but upserts nothing advances no date. In the snapshot it
+  is indistinguishable from a healthy run, and from no run at all.
+- Ten days of tolerance against a seven-day cadence lets a missed Monday ride a
+  green check for almost two weeks.
+
+Fixed by recording the thing the gate actually needs: a run ledger.
+
+- `zap_collector_runs(run_id, started_at, finished_at, records_upserted, status,
+  error)`. `start_run()` sweeps any unfinished row left by a crashed run into
+  `status='error'` before opening the new one, so a killed process cannot leave
+  a phantom live run behind. `finish_run()` writes `ok` plus the upsert count;
+  zero upserts records as `ok`, because finding nothing new is a real answer.
+- The exporter publishes `collector.{last_success_at, last_run_at, last_status,
+  last_records_upserted}` and tolerates a database that predates the table.
+- The checker asks two independent questions: staleness of the data
+  (`collected_through`, `--max-days` 10, unchanged) and liveness of the
+  collector (`last_success_at`, `--max-collector-age-days` 8). Both are measured
+  against `--as-of` (commit date), never the wall clock. A snapshot with no
+  ledger yet falls back to `collected_through` under the staleness window, so
+  nothing that was green before goes red on landing.
+- 22 new tests; suite at 53 Python unittest, green.
+
+Red/green on PR #6, deliberately, before merge:
+
+- `191f4e9` — healthy ledger (nulls, pre-ledger) — `snapshot-freshness` success.
+- `0261545` — `last_success_at` backdated to 2026-10-24 while `collected_through`
+  stayed 2026-11-02 — success on staleness ("0 day(s) old") and **failure** on
+  liveness ("last success 2026-10-24 is 9 day(s) before as_of (max 8)"). This is
+  precisely the state the old gate passed.
+- `6597944` — revert — success.
+
+Backfilling historical runs was rejected: inventing rows for cycles nobody
+recorded would make the ledger lie, which is the failure this card exists to
+prevent. Alerting on a failed run stays out of scope; the cron exit code
+already covers the loud case.

@@ -394,6 +394,12 @@ Fixed by recording the thing the gate actually needs: a run ledger.
   ledger yet falls back to `collected_through` under the staleness window, so
   nothing that was green before goes red on landing.
 - 22 new tests; suite at 53 Python unittest, green.
+- Follow-up `b722cce` (PR #7): the gate now also fails when the most recent run
+  is recorded as `error`, before the pre-ledger fallback. A failed run leaves
+  every date in the snapshot written by the previous success, so both
+  date-based assertions pass while the newest attempt to collect is dead — the
+  one state the ledger recorded and nothing acted on. `running` stays in
+  flight, not dead. Suite at 55.
 
 Red/green on PR #6, deliberately, before merge:
 

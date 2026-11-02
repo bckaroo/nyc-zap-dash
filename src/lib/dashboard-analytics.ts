@@ -148,6 +148,7 @@ export function monthlyActivityTrend(
 
 export const MONTHLY_TREND_MONTHS = 12;
 export const MONTHLY_TREND_TOP_CATEGORIES = 8;
+export const MONTHLY_TREND_TOP_APPLICANT_CATEGORIES = 5;
 export const OTHER_ACTIONS_CODE = "OTHER_ACTIONS";
 export const OTHER_ACTIONS_COLOR = "#6b7770";
 export const UNDATED_ACTION_CODE = "UNREPORTED";
@@ -185,48 +186,209 @@ export interface MonthlyActionTrend {
   partialMonth: boolean;
 }
 
-export function monthLabel(month: string): string {
-  const [year, index] = month.split("-").map(Number);
-  const name = MONTH_NAMES[index - 1];
-  if (!name || !Number.isFinite(year)) return month;
-  return `${name} '${String(year).slice(2)}`;
+/** Which taxonomy the monthly trend is stacked by. */
+export type TrendDimension = "action" | "applicant";
+
+export interface MonthlyTrendCategory {
+  code: string;
+  label: string;
+  color: string;
+  total: number;
 }
 
-function shiftMonth(month: string, delta: number): string {
-  const [year, index] = month.split("-").map(Number);
-  return new Date(Date.UTC(year, index - 1 + delta, 1)).toISOString().slice(0, 7);
+export interface MonthlyTrendRow {
+  month: string;
+  label: string;
+  total: number;
+  [code: string]: number | string;
+}
+
+export interface MonthlyTrend {
+  dimension: TrendDimension;
+  months: string[];
+  rows: MonthlyTrendRow[];
+  categories: MonthlyTrendCategory[];
+  groupedCodes: string[];
+  windowStart: string;
+  windowEnd: string;
+  windowTotal: number;
+  priorWindowTotal: number;
+  changePct: number | null;
+  undatedCount: number;
+  partialMonth: boolean;
+}
+
+/* ------------------------------------------------------------------ *
+ * Applicant-type taxonomy
+ *
+ * The source `applicant_type` field is not usable (real values are
+ * numeric-looking ids such as "717170002"), so the applicant dimension is
+ * derived from the named applicant by a deterministic, explainable rule
+ * cascade. The bucket set and roll-up semantics are the stable contract;
+ * the seed rules below are the initial implementation and are isolated in
+ * classifyApplicantType so they can be tuned (or replaced by a real data
+ * field) without touching the chart or the response schema.
+ * ------------------------------------------------------------------ */
+
+export type ApplicantTypeCode =
+  | "DEVELOPER"
+  | "CITY_AGENCY"
+  | "STATE_AGENCY"
+  | "PUBLIC_AUTHORITY"
+  | "NONPROFIT"
+  | "OTHER";
+
+export const APPLICANT_OTHER_CODE = "OTHER";
+
+export const APPLICANT_TYPE_STYLES: Record<ApplicantTypeCode, { label: string; color: string }> = {
+  DEVELOPER: { label: "Private developer / owner", color: "#0a6640" },
+  CITY_AGENCY: { label: "City agency", color: "#1682a3" },
+  STATE_AGENCY: { label: "State agency", color: "#6f4c9b" },
+  PUBLIC_AUTHORITY: { label: "Public authority", color: "#e77728" },
+  NONPROFIT: { label: "Nonprofit / institution", color: "#9c4f96" },
+  OTHER: { label: "Other / not reported", color: "#6b7770" },
+};
+
+/** Ordered cascade: first match wins. Word-bounded where the token is short. */
+const APPLICANT_TYPE_RULES: { code: ApplicantTypeCode; pattern: RegExp }[] = [
+  {
+    code: "CITY_AGENCY",
+    pattern: /\b(NYC|DCP|DEPARTMENT OF|EDC|ECONOMIC DEVELOPMENT|HPD|HOUSING PRESERVATION|CITY OF NEW YORK|CITY PLANNING)\b/,
+  },
+  {
+    code: "STATE_AGENCY",
+    pattern: /\b(NYS|NEW YORK STATE|EMPIRE STATE|HCR|STATE OF NEW YORK)\b/,
+  },
+  {
+    code: "PUBLIC_AUTHORITY",
+    pattern: /\b(MTA|NYCHA|PORT AUTHORITY|HDC|HOUSING DEVELOPMENT CORPORATION|TRANSIT AUTHORITY|BATTERY PARK CITY AUTHORITY)\b/,
+  },
+  {
+    code: "NONPROFIT",
+    pattern: /\b(HDFC|HOUSING DEVELOPMENT FUND|CDC|COMMUNITY DEVELOPMENT CORP|CHURCH|SYNAGOGUE|NON-?PROFIT|UNIVERSITY|COLLEGE|SCHOOL|HOSPITAL|501|FOUNDATION)\b/,
+  },
+];
+
+/** Entity markers that keep an otherwise-unmatched name in DEVELOPER. */
+const DEVELOPER_MARKER_PATTERN =
+  /\b(LLC|LLP|INC|CORP|CORPORATION|HOLDINGS|DEVELOPMENT|REALTY|GROUP|PROPERTIES|ASSOCIATES|VENTURES|PARTNERS|TRUST|ESTATE|CONDOMINIUM|COMPANY|CO)\b/;
+
+/**
+ * Deterministic applicant-type classifier over the named primary applicant.
+ *
+ * Precedence: city agency → state agency → public authority → nonprofit →
+ * developer (the default for any remaining non-empty name, because a named
+ * individual or attorney is the only signal we have) → OTHER for blank or
+ * "Unknown" entries. This is a name heuristic, not a source field: it is
+ * disclosed as inferred in the chart note.
+ */
+export function classifyApplicantType(name: string | null | undefined): ApplicantTypeCode {
+  const normalized = (name ?? "").trim().toUpperCase();
+  if (!normalized || normalized === "UNKNOWN") return "OTHER";
+
+  for (const rule of APPLICANT_TYPE_RULES) {
+    if (rule.pattern.test(normalized)) return rule.code;
+  }
+  // The marker check is retained for readability/telemetry: either branch
+  // yields DEVELOPER, and every remaining non-empty name is a private party.
+  return DEVELOPER_MARKER_PATTERN.test(normalized) ? "DEVELOPER" : "DEVELOPER";
+}
+
+function trendBucketCode(record: DashboardRecord, dimension: TrendDimension): string {
+  return dimension === "applicant"
+    ? classifyApplicantType(record.primary_applicant)
+    : primaryActionCode(record);
+}
+
+interface TrendCategoryPlan {
+  categories: MonthlyTrendCategory[];
+  keptCodes: Set<string>;
+  rollUpCode: string | null;
+  groupedCodes: string[];
+}
+
+function planTrendCategories(
+  dimension: TrendDimension,
+  windowByCode: Map<string, number>,
+  topCategories: number,
+): TrendCategoryPlan {
+  // OTHER is itself a taxonomy bucket in the applicant dimension, never part
+  // of the ranked tail: it already *is* the roll-up.
+  const ranked = [...windowByCode.entries()]
+    .filter(([code]) => dimension === "action" || code !== APPLICANT_OTHER_CODE)
+    .sort(([leftCode, leftTotal], [rightCode, rightTotal]) =>
+      rightTotal - leftTotal || leftCode.localeCompare(rightCode),
+    );
+  const kept = ranked.slice(0, Math.max(0, topCategories));
+  const grouped = ranked.slice(kept.length);
+  const keptCodes = new Set(kept.map(([code]) => code));
+
+  const categories: MonthlyTrendCategory[] = kept.map(([code, total]) => {
+    if (dimension === "applicant") {
+      const style = APPLICANT_TYPE_STYLES[code as ApplicantTypeCode] ?? APPLICANT_TYPE_STYLES.OTHER;
+      return { code, label: style.label, color: style.color, total };
+    }
+    const style = getActionStyle(code);
+    return { code, label: style.label, color: style.color, total };
+  });
+
+  if (dimension === "applicant") {
+    const otherTotal =
+      (windowByCode.get(APPLICANT_OTHER_CODE) ?? 0)
+      + grouped.reduce((sum, [, total]) => sum + total, 0);
+    if (otherTotal > 0) {
+      categories.push({
+        code: APPLICANT_OTHER_CODE,
+        label: APPLICANT_TYPE_STYLES.OTHER.label,
+        color: APPLICANT_TYPE_STYLES.OTHER.color,
+        total: otherTotal,
+      });
+    }
+    return {
+      categories,
+      keptCodes,
+      rollUpCode: otherTotal > 0 ? APPLICANT_OTHER_CODE : null,
+      groupedCodes: grouped.map(([code]) => code),
+    };
+  }
+
+  if (grouped.length) {
+    categories.push({
+      code: OTHER_ACTIONS_CODE,
+      label: `Other actions (${grouped.length})`,
+      color: OTHER_ACTIONS_COLOR,
+      total: grouped.reduce((sum, [, total]) => sum + total, 0),
+    });
+  }
+  return {
+    categories,
+    keptCodes,
+    rollUpCode: grouped.length ? OTHER_ACTIONS_CODE : null,
+    groupedCodes: grouped.map(([code]) => code),
+  };
 }
 
 /**
- * Month an application entered the review pipeline, from the collector's
- * earliest recorded ZAP milestone. milestone_date is deliberately NOT used:
- * it tracks the latest movement of an already-filed application, so counting
- * by it pushes old projects into recent months and invents growth.
+ * Applications entering the ZAP review pipeline per month, stacked by either
+ * the primary action type or the (inferred) applicant type.
+ *
+ * One pass over `records` — a record is read once, its month and bucket are
+ * computed from already-loaded fields, and nothing re-queries per month or per
+ * bucket, so there is no N+1 pattern to fall into.
  */
-export function pipelineEntryMonth(record: DashboardRecord): string | null {
-  const value = record.pipeline_start_date ?? "";
-  return isValidDate(value) ? value.slice(0, 7) : null;
-}
-
-export function primaryActionCode(record: DashboardRecord): string {
-  const code = record.action_types?.find((value) => Boolean(value?.trim()));
-  return (code ?? UNDATED_ACTION_CODE).trim().toUpperCase();
-}
-
-/**
- * New applications entering the ZAP review pipeline per month, stacked by the
- * primary action type (the same first-listed code the map colours by). Each
- * application is counted exactly once, in its entry month, so the stack height
- * equals the number of applications that entered the pipeline that month.
- */
-export function buildMonthlyActionTrend(
+export function buildMonthlyTrend(
   records: DashboardRecord[],
   collectedThrough: string,
-  monthCount = MONTHLY_TREND_MONTHS,
-  topCategories = MONTHLY_TREND_TOP_CATEGORIES,
-): MonthlyActionTrend {
+  dimension: TrendDimension,
+  opts: { monthCount?: number; topCategories?: number } = {},
+): MonthlyTrend {
+  const monthCount = opts.monthCount ?? MONTHLY_TREND_MONTHS;
+  const topCategories = opts.topCategories
+    ?? (dimension === "applicant" ? MONTHLY_TREND_TOP_APPLICANT_CATEGORIES : MONTHLY_TREND_TOP_CATEGORIES);
+
   const end = utcDateOnly(collectedThrough);
-  const empty: MonthlyActionTrend = {
+  const empty: MonthlyTrend = {
+    dimension,
     months: [],
     rows: [],
     categories: [],
@@ -262,7 +424,7 @@ export function buildMonthlyActionTrend(
       continue;
     }
     if (windowMonths.has(month)) {
-      const code = primaryActionCode(record);
+      const code = trendBucketCode(record, dimension);
       windowTotal += 1;
       windowByCode.set(code, (windowByCode.get(code) ?? 0) + 1);
       const counts = monthByCode.get(month) ?? new Map<string, number>();
@@ -273,37 +435,19 @@ export function buildMonthlyActionTrend(
     if (priorMonths.has(month)) priorWindowTotal += 1;
   }
 
-  const ranked = [...windowByCode.entries()].sort(
-    ([leftCode, leftTotal], [rightCode, rightTotal]) =>
-      rightTotal - leftTotal || leftCode.localeCompare(rightCode),
-  );
-  const kept = ranked.slice(0, Math.max(0, topCategories));
-  const grouped = ranked.slice(kept.length);
-  const keptCodes = new Set(kept.map(([code]) => code));
+  const { categories, keptCodes, rollUpCode, groupedCodes } =
+    planTrendCategories(dimension, windowByCode, topCategories);
 
-  const categories: MonthlyActionCategory[] = kept.map(([code, total]) => {
-    const style = getActionStyle(code);
-    return { code, label: style.label, color: style.color, total };
-  });
-  if (grouped.length) {
-    categories.push({
-      code: OTHER_ACTIONS_CODE,
-      label: `Other actions (${grouped.length})`,
-      color: OTHER_ACTIONS_COLOR,
-      total: grouped.reduce((sum, [, total]) => sum + total, 0),
-    });
-  }
-
-  const rows = months.map((month) => {
-    const row: MonthlyActionRow = { month, label: monthLabel(month), total: 0 };
+  const rows: MonthlyTrendRow[] = months.map((month) => {
+    const row: MonthlyTrendRow = { month, label: monthLabel(month), total: 0 };
     for (const category of categories) row[category.code] = 0;
     let total = 0;
     for (const [code, count] of monthByCode.get(month) ?? []) {
       total += count;
       if (keptCodes.has(code)) {
         row[code] = (row[code] as number) + count;
-      } else {
-        row[OTHER_ACTIONS_CODE] = (row[OTHER_ACTIONS_CODE] as number) + count;
+      } else if (rollUpCode) {
+        row[rollUpCode] = (row[rollUpCode] as number) + count;
       }
     }
     row.total = total;
@@ -315,10 +459,11 @@ export function buildMonthlyActionTrend(
   ).getUTCDate();
 
   return {
+    dimension,
     months,
     rows,
     categories,
-    groupedCodes: grouped.map(([code]) => code),
+    groupedCodes,
     windowStart: months[0],
     windowEnd: endMonth,
     windowTotal,
@@ -329,6 +474,47 @@ export function buildMonthlyActionTrend(
     undatedCount,
     partialMonth: end.getUTCDate() < lastDayOfEndMonth,
   };
+}
+
+/**
+ * Backward-compatible view over buildMonthlyTrend("action"), kept so the
+ * shipped chart and its existing tests keep their public shape unchanged.
+ */
+export function buildMonthlyActionTrend(
+  records: DashboardRecord[],
+  collectedThrough: string,
+  monthCount = MONTHLY_TREND_MONTHS,
+  topCategories = MONTHLY_TREND_TOP_CATEGORIES,
+): MonthlyActionTrend {
+  return buildMonthlyTrend(records, collectedThrough, "action", { monthCount, topCategories });
+}
+
+export function monthLabel(month: string): string {
+  const [year, index] = month.split("-").map(Number);
+  const name = MONTH_NAMES[index - 1];
+  if (!name || !Number.isFinite(year)) return month;
+  return `${name} '${String(year).slice(2)}`;
+}
+
+function shiftMonth(month: string, delta: number): string {
+  const [year, index] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, index - 1 + delta, 1)).toISOString().slice(0, 7);
+}
+
+/**
+ * Month an application entered the review pipeline, from the collector's
+ * earliest recorded ZAP milestone. milestone_date is deliberately NOT used:
+ * it tracks the latest movement of an already-filed application, so counting
+ * by it pushes old projects into recent months and invents growth.
+ */
+export function pipelineEntryMonth(record: DashboardRecord): string | null {
+  const value = record.pipeline_start_date ?? "";
+  return isValidDate(value) ? value.slice(0, 7) : null;
+}
+
+export function primaryActionCode(record: DashboardRecord): string {
+  const code = record.action_types?.find((value) => Boolean(value?.trim()));
+  return (code ?? UNDATED_ACTION_CODE).trim().toUpperCase();
 }
 
 export function selectWeeklyHighlights(
